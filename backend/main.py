@@ -42,11 +42,9 @@ app.add_middleware(
 # BAZA DANYCH
 # -----------------------
 
-# tworzenie tabel przy starcie aplikacji
 Base.metadata.create_all(bind=engine)
 
 
-# dependency do sesji bazy danych
 def get_db():
     db = SessionLocal()
     try:
@@ -602,38 +600,6 @@ def get_pending_leave_requests(
 
 
 # -----------------------
-# LEAVE REQUESTS - DETAILS
-# -----------------------
-
-@app.get("/leave_requests/{leave_id}")
-def get_leave_request_details(
-    leave_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    current_role = current_user.get("role")
-    current_user_id = int(current_user.get("sub"))
-
-    leave = db.query(LeaveRequest).filter(LeaveRequest.id == leave_id).first()
-
-    if not leave:
-        raise HTTPException(status_code=404, detail="Wniosek nie istnieje")
-
-    if current_role in ["admin", "kadry", "zarzad"]:
-        return build_leave_details_response(leave, db)
-
-    if current_role == "kierownik":
-        if leave.manager_id != current_user_id:
-            raise HTTPException(status_code=403, detail="Brak uprawnień")
-        return build_leave_details_response(leave, db)
-
-    if leave.user_id != current_user_id:
-        raise HTTPException(status_code=403, detail="Brak uprawnień")
-
-    return build_leave_details_response(leave, db)
-
-
-# -----------------------
 # LEAVE REQUESTS - DECISION
 # -----------------------
 
@@ -740,3 +706,35 @@ def get_leave_summary(
         "rejected_requests": len(rejected),
         "total_approved_days": total_days,
     }
+
+
+# -----------------------
+# LEAVE REQUESTS - DETAILS
+# -----------------------
+
+@app.get("/leave_requests/{leave_id}")
+def get_leave_request_details(
+    leave_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    leave = db.query(LeaveRequest).filter(LeaveRequest.id == leave_id).first()
+
+    if not leave:
+        raise HTTPException(status_code=404, detail="Wniosek nie istnieje")
+
+    if current_role in ["admin", "kadry", "zarzad"]:
+        return build_leave_details_response(leave, db)
+
+    if current_role == "kierownik":
+        if leave.manager_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+        return build_leave_details_response(leave, db)
+
+    if leave.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    return build_leave_details_response(leave, db)

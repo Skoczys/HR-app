@@ -1,13 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { saveToken, setMustChangePassword } from "../services/auth";
 import FLoader from "../components/FLoader";
 import famakMark from "../assets/Floader.png";
 
 export default function Login() {
-  const navigate = useNavigate();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -34,12 +31,11 @@ export default function Login() {
 
       setTimeout(() => {
         if (response.data.must_change_password) {
-          navigate("/change-password");
+          window.location.replace("/change-password");
         } else {
-          navigate("/dashboard");
+          window.location.replace("/dashboard");
         }
       }, 1100);
-      
     } catch (err) {
       setLoading(false);
       setError("Nieprawidłowy email lub hasło");

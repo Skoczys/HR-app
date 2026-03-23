@@ -57,10 +57,10 @@ select {
 
 .auth-card {
   width: 100%;
-  max-width: 460px;
+  max-width: 576px;
   background: rgba(255, 255, 255, 0.97);
-  border-radius: 24px;
-  padding: 34px;
+  border-radius: 28px;
+  padding: 42px;
   box-shadow: 0 24px 70px rgba(7, 23, 36, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.2);
   min-height: 430px;
@@ -82,9 +82,9 @@ select {
 }
 
 .brand-mark-box {
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
+  width: 82px;
+  height: 82px;
+  border-radius: 22px;
   background: linear-gradient(135deg, rgba(147, 177, 38, 0.14), rgba(147, 177, 38, 0.06));
   display: flex;
   align-items: center;
@@ -93,8 +93,8 @@ select {
 }
 
 .brand-mark-image {
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
   display: block;
 }
@@ -103,11 +103,13 @@ select {
   margin: 0 0 6px;
   font-size: 2.1rem;
   line-height: 1.1;
+  color: #0f2540;
 }
 
 .auth-subtitle {
   margin: 0;
   color: var(--famak-muted);
+  font-size: 18px;
 }
 
 .auth-form {
@@ -117,17 +119,20 @@ select {
 }
 
 .auth-form label {
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 4px;
+  font-size: 17px;
+  color: #0f2540;
 }
 
 .auth-form input {
-  height: 48px;
+  height: 60px;
   border: 1px solid var(--famak-border);
-  border-radius: 14px;
-  padding: 0 14px;
-  background: #f9fbfd;
+  border-radius: 18px;
+  padding: 0 18px;
+  background: #f3f7fd;
   transition: 0.2s ease;
+  font-size: 18px;
 }
 
 .auth-form input:focus {
@@ -135,6 +140,30 @@ select {
   border-color: var(--famak-green);
   box-shadow: 0 0 0 4px rgba(147, 177, 38, 0.14);
   background: white;
+}
+
+.auth-form button {
+  margin-top: 16px;
+  height: 56px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--famak-green), var(--famak-green-dark));
+  color: white;
+  font-weight: 800;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(147, 177, 38, 0.3);
+  transition: transform 0.18s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.auth-form button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(147, 177, 38, 0.36);
+  filter: brightness(1.03);
+}
+
+.auth-form button:active {
+  transform: scale(0.98);
 }
 
 .auth-error {
@@ -814,14 +843,7 @@ button:disabled {
    USERS
 ----------------------- */
 
-.users-form-card {
-  background: white;
-  border-radius: 20px;
-  padding: 22px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-  margin-bottom: 32px;
-}
-
+.users-form-card,
 .users-from-card {
   background: white;
   border-radius: 20px;
@@ -940,4 +962,12 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.auth-success {
+  background: #dcfce7;
+  color: #166534;
+  padding: 11px 13px;
+  border-radius: 12px;
+  margin-top: 2px;
 }
