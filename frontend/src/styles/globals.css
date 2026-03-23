@@ -971,3 +971,18 @@ button:disabled {
   border-radius: 12px;
   margin-top: 2px;
 }
+
+.leave-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.leave-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
