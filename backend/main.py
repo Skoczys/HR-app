@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -74,6 +76,40 @@ def build_leave_response(leave: LeaveRequest) -> LeaveRequestResponse:
         notes=leave.notes,
         total_days=calculate_leave_days(leave.start_date, leave.end_date),
     )
+
+
+def build_full_name(user: User | None):
+    if not user:
+        return None
+    return f"{user.first_name} {user.last_name}"
+
+
+def build_leave_details_response(leave: LeaveRequest, db: Session):
+    employee = db.query(User).filter(User.id == leave.user_id).first()
+    manager = db.query(User).filter(User.id == leave.manager_id).first() if leave.manager_id else None
+    substitute = db.query(User).filter(User.id == leave.substitute_id).first() if leave.substitute_id else None
+
+    decided_by = None
+    if hasattr(leave, "decided_by_user_id") and leave.decided_by_user_id:
+        decided_by = db.query(User).filter(User.id == leave.decided_by_user_id).first()
+
+    return {
+        "id": leave.id,
+        "status": leave.status,
+        "leave_type": leave.leave_type,
+        "start_date": leave.start_date,
+        "end_date": leave.end_date,
+        "total_days": calculate_leave_days(leave.start_date, leave.end_date),
+        "notes": leave.notes,
+        "employee_name": build_full_name(employee),
+        "employee_department": employee.department if employee else None,
+        "employee_job_title": employee.job_title if employee else None,
+        "manager_name": build_full_name(manager),
+        "substitute_name": build_full_name(substitute),
+        "decision_comment": getattr(leave, "decision_comment", None),
+        "decision_date": getattr(leave, "decision_date", None),
+        "decided_by_name": build_full_name(decided_by),
+    }
 
 
 # -----------------------
@@ -197,7 +233,8 @@ def create_user(
         hire_date=user.hire_date,
         email=user.email,
         password=hashed_password,
-        must_change_password=False,
+        is_active=True,
+        must_change_password=True,
     )
 
     db.add(db_user)
@@ -321,6 +358,7 @@ def update_user(
 
     if user_data.password:
         user.password = hash_password(user_data.password)
+        user.must_change_password = True
 
     db.commit()
     db.refresh(user)
@@ -564,6 +602,38 @@ def get_pending_leave_requests(
 
 
 # -----------------------
+# LEAVE REQUESTS - DETAILS
+# -----------------------
+
+@app.get("/leave_requests/{leave_id}")
+def get_leave_request_details(
+    leave_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    leave = db.query(LeaveRequest).filter(LeaveRequest.id == leave_id).first()
+
+    if not leave:
+        raise HTTPException(status_code=404, detail="Wniosek nie istnieje")
+
+    if current_role in ["admin", "kadry", "zarzad"]:
+        return build_leave_details_response(leave, db)
+
+    if current_role == "kierownik":
+        if leave.manager_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+        return build_leave_details_response(leave, db)
+
+    if leave.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    return build_leave_details_response(leave, db)
+
+
+# -----------------------
 # LEAVE REQUESTS - DECISION
 # -----------------------
 
@@ -571,6 +641,7 @@ def get_pending_leave_requests(
 def decide_leave_request(
     leave_id: int,
     decision: str,
+    decision_comment: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -592,6 +663,16 @@ def decide_leave_request(
         raise HTTPException(status_code=400, detail="Zła decyzja")
 
     leave.status = decision
+
+    if hasattr(leave, "decision_comment"):
+        leave.decision_comment = decision_comment
+
+    if hasattr(leave, "decided_by_user_id"):
+        leave.decided_by_user_id = current_user_id
+
+    if hasattr(leave, "decision_date"):
+        leave.decision_date = date.today()
+
     db.commit()
     db.refresh(leave)
 

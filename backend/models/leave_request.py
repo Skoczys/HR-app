@@ -37,3 +37,7 @@ class LeaveRequest(Base):
 
     # relacja do użytkownika składającego wniosek
     user = relationship("User", foreign_keys=[user_id])
+
+    decision_comment = Column(String, nullable=True)
+    decided_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decision_date = Column(Date, nullable=True)

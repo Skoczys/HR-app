@@ -1,10 +1,6 @@
-from datetime import date
 from pydantic import BaseModel
+from datetime import date
 
-
-# -----------------------
-# SCHEMAT TWORZENIA WNIOSKU
-# -----------------------
 
 class LeaveRequestCreate(BaseModel):
     start_date: date
@@ -14,21 +10,36 @@ class LeaveRequestCreate(BaseModel):
     notes: str | None = None
 
 
-# -----------------------
-# SCHEMAT ODPOWIEDZI WNIOSKU
-# -----------------------
+class LeaveRequestDecision(BaseModel):
+    decision: str
+    decision_comment: str | None = None
+
 
 class LeaveRequestResponse(BaseModel):
     id: int
+
     user_id: int
-    manager_id: int | None
-    substitute_id: int | None
+    manager_id: int | None = None
+    substitute_id: int | None = None
+
     start_date: date
     end_date: date
     leave_type: str
     status: str
-    notes: str | None
+    notes: str | None = None
     total_days: int
+
+    decision_comment: str | None = None
+    decided_by_user_id: int | None = None
+    decision_date: date | None = None
+
+    employee_name: str | None = None
+    employee_department: str | None = None
+    employee_job_title: str | None = None
+
+    manager_name: str | None = None
+    substitute_name: str | None = None
+    decided_by_name: str | None = None
 
     class Config:
         from_attributes = True
