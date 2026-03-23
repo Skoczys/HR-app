@@ -8,6 +8,11 @@ export default function PendingLeaves() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [decisionModalOpen, setDecisionModalOpen] = useState(false);
+  const [decisionType, setDecisionType] = useState("");
+  const [decisionLeaveId, setDecisionLeaveId] = useState(null);
+  const [decisionComment, setDecisionComment] = useState("");
+
   const loadLeaves = async () => {
     try {
       const res = await api.get("/leave_requests/pending");
@@ -21,28 +26,6 @@ export default function PendingLeaves() {
   useEffect(() => {
     loadLeaves();
   }, []);
-
-  const handleDecision = async (leaveId, decision) => {
-    setLoadingId(leaveId);
-    setError("");
-
-    try {
-      await api.patch(`/leave_requests/${leaveId}/decision`, null, {
-        params: { decision },
-      });
-
-      if (selectedLeave?.id === leaveId) {
-        setSelectedLeave(null);
-      }
-
-      await loadLeaves();
-    } catch (err) {
-      console.error(err);
-      setError("Nie udało się zapisać decyzji.");
-    } finally {
-      setLoadingId(null);
-    }
-  };
 
   const handlePreview = async (leaveId) => {
     setDetailsLoading(true);
@@ -59,7 +42,59 @@ export default function PendingLeaves() {
     }
   };
 
-  const closeModal = () => {
+  const openDecisionModal = (leaveId, decision) => {
+    setDecisionLeaveId(leaveId);
+    setDecisionType(decision);
+    setDecisionComment("");
+    setDecisionModalOpen(true);
+    setError("");
+  };
+
+  const closeDecisionModal = () => {
+    setDecisionModalOpen(false);
+    setDecisionLeaveId(null);
+    setDecisionType("");
+    setDecisionComment("");
+  };
+
+  const submitDecision = async () => {
+    if (!decisionLeaveId || !decisionType) return;
+
+    if (decisionType === "rejected" && !decisionComment.trim()) {
+      setError("Przy odrzuceniu wniosku musisz podać powód.");
+      return;
+    }
+
+    setLoadingId(decisionLeaveId);
+    setError("");
+
+    try {
+      await api.patch(`/leave_requests/${decisionLeaveId}/decision`, null, {
+        params: {
+          decision: decisionType,
+          decision_comment: decisionComment.trim() || null,
+        },
+      });
+
+      if (selectedLeave?.id === decisionLeaveId) {
+        setSelectedLeave({
+          ...selectedLeave,
+          status: decisionType,
+          decision_comment: decisionComment.trim() || null,
+        });
+      }
+
+      closeDecisionModal();
+      await loadLeaves();
+    } catch (err) {
+      console.error(err);
+      setError("Nie udało się zapisać decyzji.");
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const closePreview = () => {
     setSelectedLeave(null);
   };
 
@@ -98,7 +133,7 @@ export default function PendingLeaves() {
               <button
                 type="button"
                 className="approve-button"
-                onClick={() => handleDecision(leave.id, "approved")}
+                onClick={() => openDecisionModal(leave.id, "approved")}
                 disabled={loadingId === leave.id}
               >
                 Akceptuj
@@ -107,7 +142,7 @@ export default function PendingLeaves() {
               <button
                 type="button"
                 className="reject-button"
-                onClick={() => handleDecision(leave.id, "rejected")}
+                onClick={() => openDecisionModal(leave.id, "rejected")}
                 disabled={loadingId === leave.id}
               >
                 Odrzuć
@@ -118,7 +153,7 @@ export default function PendingLeaves() {
       </div>
 
       {selectedLeave && (
-        <div className="modal-overlay" onClick={closeModal}>
+        <div className="modal-overlay" onClick={closePreview}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="page-header">
               <h2 className="page-title" style={{ marginBottom: 0 }}>
@@ -127,7 +162,7 @@ export default function PendingLeaves() {
               <button
                 type="button"
                 className="secondary-button"
-                onClick={closeModal}
+                onClick={closePreview}
               >
                 Zamknij
               </button>
@@ -185,6 +220,12 @@ export default function PendingLeaves() {
                   {selectedLeave.substitute_name || "Brak"}
                 </div>
 
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Uwagi pracownika:</strong>
+                  <br />
+                  {selectedLeave.notes || "Brak"}
+                </div>
+
                 <div>
                   <strong>Status:</strong>
                   <br />
@@ -203,19 +244,81 @@ export default function PendingLeaves() {
                   {selectedLeave.decision_date || "Jeszcze brak"}
                 </div>
 
-                <div>
+                <div style={{ gridColumn: "1 / -1" }}>
                   <strong>Komentarz decyzji:</strong>
                   <br />
                   {selectedLeave.decision_comment || "Brak"}
                 </div>
-
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <strong>Uwagi pracownika:</strong>
-                  <br />
-                  {selectedLeave.notes || "Brak"}
-                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {decisionModalOpen && (
+        <div className="modal-overlay" onClick={closeDecisionModal}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header">
+              <h2 className="page-title" style={{ marginBottom: 0 }}>
+                {decisionType === "approved"
+                  ? "Akceptacja wniosku"
+                  : "Odrzucenie wniosku"}
+              </h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closeDecisionModal}
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="form-full">
+              <label>
+                {decisionType === "approved"
+                  ? "Komentarz do decyzji (opcjonalnie)"
+                  : "Powód odrzucenia"}
+              </label>
+              <textarea
+                rows="5"
+                placeholder={
+                  decisionType === "approved"
+                    ? "Możesz dodać krótki komentarz"
+                    : "Wpisz powód odrzucenia wniosku"
+                }
+                value={decisionComment}
+                onChange={(e) => setDecisionComment(e.target.value)}
+              />
+            </div>
+
+            <div
+              className="leave-actions"
+              style={{ justifyContent: "flex-end", marginTop: "20px" }}
+            >
+              {decisionType === "approved" ? (
+                <button
+                  type="button"
+                  className="approve-button"
+                  onClick={submitDecision}
+                  disabled={loadingId === decisionLeaveId}
+                >
+                  {loadingId === decisionLeaveId
+                    ? "Zapisywanie..."
+                    : "Potwierdź akceptację"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="reject-button"
+                  onClick={submitDecision}
+                  disabled={loadingId === decisionLeaveId}
+                >
+                  {loadingId === decisionLeaveId
+                    ? "Zapisywanie..."
+                    : "Potwierdź odrzucenie"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
