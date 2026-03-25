@@ -1,11 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
-
 import LeaveRequests from "./pages/LeaveRequests";
 import PendingLeaves from "./pages/PendingLeaves";
 import UsersPage from "./pages/UsersPage";
 import ChangePassword from "./pages/ChangePassword";
+import TeamCalendar from "./pages/TeamCalendar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppLayout from "./layout/AppLayout";
 import { getToken, getMustChangePassword } from "./services/auth";
@@ -75,6 +75,21 @@ export default function App() {
             ) : (
               <AppLayout>
                 <PendingLeaves />
+              </AppLayout>
+            )}
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/team-calendar"
+        element={
+          <ProtectedRoute>
+            {mustChangePassword ? (
+              <Navigate to="/change-password" replace />
+            ) : (
+              <AppLayout>
+                <TeamCalendar />
               </AppLayout>
             )}
           </ProtectedRoute>
