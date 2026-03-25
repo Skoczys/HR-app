@@ -1,4 +1,5 @@
 from datetime import date
+import calendar
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +24,6 @@ from schemas.leave_request import (
     LeaveBalanceCreate,
     LeaveBalanceUpdate,
     LeaveBalanceResponse,
-
 )
 from security import (
     hash_password,
@@ -44,6 +44,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# -----------------------
+# STAŁE
+# -----------------------
+
+ALLOWED_LEAVE_TYPES = [
+    "wypoczynkowy",
+    "na_zadanie",
+    "chorobowe",
+    "okolicznosciowy",
+    "bezplatny",
+]
 
 
 # -----------------------
@@ -132,6 +145,7 @@ def build_leave_details_response(leave: LeaveRequest, db: Session):
         "decided_by_name": build_full_name(decided_by),
     }
 
+
 def build_leave_balance_response(balance: LeaveBalance, db: Session) -> LeaveBalanceResponse:
     employee = db.query(User).filter(User.id == balance.user_id).first()
 
@@ -161,6 +175,7 @@ def build_leave_balance_response(balance: LeaveBalance, db: Session) -> LeaveBal
         employee_job_title=employee.job_title if employee else None,
     )
 
+
 def validate_leave_balance_for_request(
     user_id: int,
     leave_type: str,
@@ -168,7 +183,6 @@ def validate_leave_balance_for_request(
     db: Session,
     year: int,
 ):
-    # Typy które schodzą z puli urlopowej
     balance_required_types = ["wypoczynkowy", "na_zadanie"]
 
     if leave_type not in balance_required_types:
@@ -202,6 +216,68 @@ def validate_leave_balance_for_request(
                 status_code=400,
                 detail=f"Brak wystarczającego limitu urlopu na żądanie. Pozostało {remaining_on_demand_days} dni.",
             )
+
+
+def apply_leave_balance_on_approval(
+    leave: LeaveRequest,
+    db: Session,
+):
+    balance_required_types = ["wypoczynkowy", "na_zadanie"]
+
+    if leave.leave_type not in balance_required_types:
+        return
+
+    total_days = calculate_leave_days(leave.start_date, leave.end_date)
+
+    balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == leave.user_id,
+        LeaveBalance.year == leave.start_date.year,
+    ).first()
+
+    if not balance:
+        raise HTTPException(
+            status_code=400,
+            detail="Nie można zaakceptować wniosku bez salda urlopowego dla tego roku.",
+        )
+
+    total_available_days = balance.base_limit_days + balance.carried_over_days
+    remaining_days = total_available_days - balance.used_days
+
+    if total_days > remaining_days:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nie można zaakceptować wniosku. Pozostało tylko {remaining_days} dni salda urlopowego.",
+        )
+
+    if leave.leave_type == "na_zadanie":
+        remaining_on_demand_days = 4 - balance.on_demand_used_days
+
+        if total_days > remaining_on_demand_days:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nie można zaakceptować wniosku. Pozostało tylko {remaining_on_demand_days} dni urlopu na żądanie.",
+            )
+
+        balance.on_demand_used_days += total_days
+
+    balance.used_days += total_days
+
+def build_team_calendar_event(leave: LeaveRequest, db: Session):
+    employee = db.query(User).filter(User.id == leave.user_id).first()
+
+    return {
+        "id": leave.id,
+        "user_id": leave.user_id,
+        "employee_name": build_full_name(employee),
+        "employee_department": employee.department if employee else None,
+        "employee_job_title": employee.job_title if employee else None,
+        "leave_type": leave.leave_type,
+        "status": leave.status,
+        "start_date": leave.start_date,
+        "end_date": leave.end_date,
+        "total_days": calculate_leave_days(leave.start_date, leave.end_date),
+        "decision_comment": leave.decision_comment,
+    }
 
 # -----------------------
 # ROOT
@@ -619,14 +695,18 @@ def create_leave_request(
     user_id = int(current_user.get("sub"))
     manager_id = current_user.get("manager_user_id")
 
-    # Walidacja dat
     if leave_data.end_date < leave_data.start_date:
         raise HTTPException(
             status_code=400,
             detail="Data zakończenia nie może być wcześniejsza niż data rozpoczęcia",
         )
 
-    # Sprawdzenie przełożonego
+    if leave_data.leave_type not in ALLOWED_LEAVE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Nieprawidłowy typ wniosku",
+        )
+
     if manager_id is not None:
         manager = db.query(User).filter(
             User.id == manager_id,
@@ -636,7 +716,6 @@ def create_leave_request(
         if not manager:
             raise HTTPException(status_code=400, detail="Przełożony użytkownika nie istnieje")
 
-    # Sprawdzenie zastępującego
     if leave_data.substitute_id is not None:
         substitute = db.query(User).filter(
             User.id == leave_data.substitute_id,
@@ -646,10 +725,8 @@ def create_leave_request(
         if not substitute:
             raise HTTPException(status_code=400, detail="Wybrany zastępujący nie istnieje")
 
-    # Liczenie dni
     total_days = calculate_leave_days(leave_data.start_date, leave_data.end_date)
 
-    #  KLUCZOWA WALIDACJA SALDA
     validate_leave_balance_for_request(
         user_id=user_id,
         leave_type=leave_data.leave_type,
@@ -658,7 +735,6 @@ def create_leave_request(
         year=leave_data.start_date.year,
     )
 
-    # Tworzenie wniosku
     leave = LeaveRequest(
         user_id=user_id,
         manager_id=manager_id,
@@ -747,6 +823,9 @@ def decide_leave_request(
 
     if leave.status != "pending":
         raise HTTPException(status_code=400, detail="Ten wniosek został już rozpatrzony")
+
+    if decision_data.decision == "approved":
+        apply_leave_balance_on_approval(leave, db)
 
     leave.status = decision_data.decision
     leave.decision_comment = decision_data.decision_comment
@@ -994,3 +1073,62 @@ def update_leave_balance(
     db.refresh(balance)
 
     return build_leave_balance_response(balance, db)
+
+
+# -----------------------
+# TEAM CALENDAR
+# -----------------------
+
+@app.get("/team/calendar")
+def get_team_calendar(
+    year: int = Query(default=date.today().year),
+    month: int = Query(default=date.today().month),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Nieprawidłowy miesiąc")
+
+    if current_role not in ["kierownik", "admin", "kadry", "zarzad"]:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    month_start = date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+    if current_role == "kierownik":
+        team_users = db.query(User).filter(
+            User.manager_user_id == current_user_id,
+            User.is_active == True,
+        ).all()
+
+        team_user_ids = [user.id for user in team_users]
+
+        if not team_user_ids:
+            return {
+                "year": year,
+                "month": month,
+                "events": [],
+            }
+
+        leaves = db.query(LeaveRequest).filter(
+            LeaveRequest.user_id.in_(team_user_ids),
+            LeaveRequest.status == "approved",
+            LeaveRequest.start_date <= month_end,
+            LeaveRequest.end_date >= month_start,
+        ).order_by(LeaveRequest.start_date.asc(), LeaveRequest.id.asc()).all()
+
+    else:
+        leaves = db.query(LeaveRequest).filter(
+            LeaveRequest.status == "approved",
+            LeaveRequest.start_date <= month_end,
+            LeaveRequest.end_date >= month_start,
+        ).order_by(LeaveRequest.start_date.asc(), LeaveRequest.id.asc()).all()
+
+    return {
+        "year": year,
+        "month": month,
+        "events": [build_team_calendar_event(leave, db) for leave in leaves],
+    }

@@ -12,6 +12,7 @@ const initialForm = {
 const leaveTypes = [
   { value: "wypoczynkowy", label: "Urlop wypoczynkowy" },
   { value: "na_zadanie", label: "Na żądanie" },
+  { value: "chorobowe", label: "Chorobowe" },
   { value: "okolicznosciowy", label: "Okolicznościowy" },
   { value: "bezplatny", label: "Bezpłatny" },
 ];
