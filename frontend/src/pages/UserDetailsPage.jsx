@@ -1,0 +1,312 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import api from "../services/api";
+
+const leaveTypeLabels = {
+  wypoczynkowy: "Urlop wypoczynkowy",
+  na_zadanie: "Na żądanie",
+  chorobowe: "Chorobowe",
+  okolicznosciowy: "Okolicznościowy",
+  bezplatny: "Bezpłatny",
+};
+
+export default function UserDetailsPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+
+  const [user, setUser] = useState(null);
+  const [balance, setBalance] = useState(null);
+  const [leaves, setLeaves] = useState([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [leavesLoading, setLeavesLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const currentYear = new Date().getFullYear();
+
+  const loadLeaves = async (selectedStatus = "all") => {
+    setLeavesLoading(true);
+
+    try {
+      const params = {};
+
+      if (selectedStatus !== "all") {
+        params.status = selectedStatus;
+      }
+
+      const leavesRes = await api.get(`/users/${id}/leave_requests`, { params });
+      setLeaves(leavesRes.data || []);
+    } catch (err) {
+      console.error(err);
+      setLeaves([]);
+    } finally {
+      setLeavesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const userRes = await api.get(`/users/${id}`);
+        setUser(userRes.data);
+
+        try {
+          const balanceRes = await api.get(`/leave_balance/${id}?year=${currentYear}`);
+          setBalance(balanceRes.data);
+        } catch {
+          setBalance(null);
+        }
+
+        await loadLeaves(statusFilter);
+      } catch (err) {
+        console.error(err);
+        setError("Nie udało się pobrać danych pracownika.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [id, currentYear]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadLeaves(statusFilter);
+  }, [statusFilter]);
+
+  if (loading) {
+    return (
+      <div className="user-details-page">
+        <h1 className="page-title">Szczegóły pracownika</h1>
+        <div className="section-muted">Ładowanie danych...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="user-details-page">
+        <div className="page-header">
+          <h1 className="page-title">Szczegóły pracownika</h1>
+          <button className="secondary-button" onClick={() => navigate("/users")}>
+            Wróć
+          </button>
+        </div>
+
+        <div className="auth-error">{error}</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="user-details-page">
+        <div className="page-header">
+          <h1 className="page-title">Szczegóły pracownika</h1>
+          <button className="secondary-button" onClick={() => navigate("/users")}>
+            Wróć
+          </button>
+        </div>
+
+        <div className="auth-error">Nie znaleziono pracownika.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="user-details-page">
+      <div className="page-header">
+        <h1 className="page-title">
+          {user.first_name} {user.last_name}
+        </h1>
+
+        <button className="secondary-button" onClick={() => navigate("/users")}>
+          Wróć
+        </button>
+      </div>
+
+      <div className="summary-grid">
+        <div className="summary-card">
+          <span>Nr pracownika</span>
+          <strong>{user.employee_number}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Rola</span>
+          <strong>{user.role}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Dział</span>
+          <strong>{user.department}</strong>
+        </div>
+
+        <div className="summary-card">
+          <span>Status</span>
+          <strong>{user.is_active ? "Aktywny" : "Nieaktywny"}</strong>
+        </div>
+      </div>
+
+      <div className="user-details-grid">
+        <div className="user-details-card">
+          <h3>Dane podstawowe</h3>
+
+          <div className="user-details-list">
+            <div className="user-details-row">
+              <strong>Imię</strong>
+              <span>{user.first_name}</span>
+            </div>
+
+            <div className="user-details-row">
+              <strong>Nazwisko</strong>
+              <span>{user.last_name}</span>
+            </div>
+
+            <div className="user-details-row">
+              <strong>Email</strong>
+              <span>{user.email}</span>
+            </div>
+
+            <div className="user-details-row">
+              <strong>Stanowisko</strong>
+              <span>{user.job_title || "-"}</span>
+            </div>
+
+            <div className="user-details-row">
+              <strong>Data zatrudnienia</strong>
+              <span>{user.hire_date}</span>
+            </div>
+
+            <div className="user-details-row">
+              <strong>ID przełożonego</strong>
+              <span>{user.manager_user_id || "-"}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="user-details-card">
+          <h3>Saldo urlopowe ({currentYear})</h3>
+
+          {balance ? (
+            <div className="user-details-list">
+              <div className="user-details-row">
+                <strong>Limit podstawowy</strong>
+                <span>{balance.base_limit_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Przeniesione</strong>
+                <span>{balance.carried_over_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Wykorzystane</strong>
+                <span>{balance.used_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Pozostało</strong>
+                <span>{balance.remaining_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Na żądanie wykorzystane</strong>
+                <span>{balance.on_demand_used_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Na żądanie pozostało</strong>
+                <span>{balance.remaining_on_demand_days} dni</span>
+              </div>
+            </div>
+          ) : (
+            <div className="section-muted">
+              Brak salda urlopowego dla tego roku.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="user-details-card">
+        <div className="page-header" style={{ marginBottom: "16px" }}>
+          <h3 style={{ margin: 0 }}>Historia wniosków urlopowych</h3>
+
+          <div className="user-history-filters">
+            <button
+              type="button"
+              className={statusFilter === "all" ? "primary-button" : "secondary-button"}
+              onClick={() => setStatusFilter("all")}
+            >
+              Wszystkie
+            </button>
+
+            <button
+              type="button"
+              className={statusFilter === "pending" ? "primary-button" : "secondary-button"}
+              onClick={() => setStatusFilter("pending")}
+            >
+              Oczekujące
+            </button>
+
+            <button
+              type="button"
+              className={statusFilter === "approved" ? "primary-button" : "secondary-button"}
+              onClick={() => setStatusFilter("approved")}
+            >
+              Zaakceptowane
+            </button>
+
+            <button
+              type="button"
+              className={statusFilter === "rejected" ? "primary-button" : "secondary-button"}
+              onClick={() => setStatusFilter("rejected")}
+            >
+              Odrzucone
+            </button>
+          </div>
+        </div>
+
+        {leavesLoading ? (
+          <div className="section-muted">Ładowanie historii...</div>
+        ) : leaves.length === 0 ? (
+          <div className="section-muted">Brak wniosków urlopowych.</div>
+        ) : (
+          <div className="leave-list">
+            {leaves.map((leave) => (
+              <div key={leave.id} className="leave-card">
+                <div className="leave-left">
+                  <div className="leave-title">
+                    {leaveTypeLabels[leave.leave_type] || leave.leave_type}
+                  </div>
+
+                  <div className="leave-dates">
+                    {leave.start_date} → {leave.end_date}
+                  </div>
+
+                  <div className="leave-extra">
+                    {leave.total_days} dni
+                  </div>
+
+                  {leave.decision_comment && (
+                    <div className="leave-extra">
+                      Komentarz: {leave.decision_comment}
+                    </div>
+                  )}
+                </div>
+
+                <div className="leave-right">
+                  <span className={`status-badge status-${leave.status}`}>
+                    {leave.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

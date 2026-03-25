@@ -33,6 +33,13 @@ export default function UsersPage() {
   const [formLoading, setFormLoading] = useState(false);
 
   const isAdmin = profile?.role === "admin";
+  const isManager = profile?.role === "kierownik";
+  const canViewUsers =
+    profile?.role === "admin" ||
+    profile?.role === "kadry" ||
+    profile?.role === "kierownik" ||
+    profile?.role === "zarzad";
+
   const canManageUsers = profile?.role === "admin" || profile?.role === "kadry";
 
   const loadUsers = async () => {
@@ -68,10 +75,10 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => {
-    if (canManageUsers !== null) {
+    if (profile) {
       loadUsers();
     }
-  }, [filters, canManageUsers]);
+  }, [filters, profile]);
 
   const handleDeactivate = async (userId) => {
     setLoadingId(userId);
@@ -170,12 +177,10 @@ export default function UsersPage() {
         email: form.email,
       };
 
-      // admin może ustawiać / zmieniać hasło
       if (isAdmin) {
         payload.password = form.password || null;
       }
 
-      // przy dodawaniu kadry też muszą podać hasło startowe
       if (!editingUserId && !isAdmin) {
         payload.password = form.password;
       }
@@ -196,7 +201,7 @@ export default function UsersPage() {
     }
   };
 
-  if (!canManageUsers) {
+  if (!canViewUsers) {
     return (
       <div className="users-page">
         <h1 className="page-title">Pracownicy</h1>
@@ -208,15 +213,20 @@ export default function UsersPage() {
   return (
     <div className="users-page">
       <div className="page-header">
-        <h1 className="page-title">Pracownicy</h1>
-        <button className="primary-button" onClick={openCreateForm}>
-          Nowy pracownik
-        </button>
+        <h1 className="page-title">
+          {isManager ? "Mój zespół" : "Pracownicy"}
+        </h1>
+
+        {canManageUsers && (
+          <button className="primary-button" onClick={openCreateForm}>
+            Nowy pracownik
+          </button>
+        )}
       </div>
 
       {error && <div className="auth-error">{error}</div>}
 
-      {showForm && (
+      {showForm && canManageUsers && (
         <div className="users-form-card">
           <div className="page-header">
             <h2>{editingUserId ? "Edytuj pracownika" : "Dodaj pracownika"}</h2>
@@ -390,8 +400,8 @@ export default function UsersPage() {
               onChange={handleFilterChange}
             >
               <option value="active">Aktywni</option>
-              {isAdmin && <option value="inactive">Nieaktywni</option>}
-              {isAdmin && <option value="all">Wszyscy</option>}
+              {!isManager && isAdmin && <option value="inactive">Nieaktywni</option>}
+              {!isManager && isAdmin && <option value="all">Wszyscy</option>}
             </select>
           </div>
         </div>
@@ -420,12 +430,14 @@ export default function UsersPage() {
             <div>{user.email}</div>
 
             <div className="users-actions">
-              <button
-                className="table-button secondary-button"
-                onClick={() => openEditForm(user)}
-              >
-                Edytuj
-              </button>
+              {canManageUsers && (
+                <button
+                  className="table-button secondary-button"
+                  onClick={() => openEditForm(user)}
+                >
+                  Edytuj
+                </button>
+              )}
 
               {isAdmin && filters.status !== "inactive" && (
                 <button

@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import LeaveRequests from "./pages/LeaveRequests";
 import PendingLeaves from "./pages/PendingLeaves";
 import UsersPage from "./pages/UsersPage";
+import UserDetailsPage from "./pages/UserDetailsPage";
 import ChangePassword from "./pages/ChangePassword";
 import TeamCalendar from "./pages/TeamCalendar";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -105,6 +106,21 @@ export default function App() {
             ) : (
               <AppLayout>
                 <UsersPage />
+              </AppLayout>
+            )}
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/users/:id"
+        element={
+          <ProtectedRoute>
+            {mustChangePassword ? (
+              <Navigate to="/change-password" replace />
+            ) : (
+              <AppLayout>
+                <UserDetailsPage />
               </AppLayout>
             )}
           </ProtectedRoute>

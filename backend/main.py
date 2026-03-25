@@ -279,6 +279,9 @@ def build_team_calendar_event(leave: LeaveRequest, db: Session):
         "decision_comment": leave.decision_comment,
     }
 
+def is_leave_active_on_day(leave: LeaveRequest, target_day: date) -> bool:
+    return leave.start_date <= target_day <= leave.end_date
+
 # -----------------------
 # ROOT
 # -----------------------
@@ -772,6 +775,46 @@ def get_my_leave_requests(
 
 
 # -----------------------
+# LEAVE REQUESTS - USER HISTORY
+# -----------------------
+
+@app.get("/users/{user_id}/leave_requests", response_model=list[LeaveRequestResponse])
+def get_user_leave_requests(
+    user_id: int,
+    status: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.is_active == True,
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+    if current_role in ["admin", "kadry", "zarzad"]:
+        pass
+    elif current_role == "kierownik":
+        if user.id != current_user_id and user.manager_user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+    else:
+        if user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    query = db.query(LeaveRequest).filter(LeaveRequest.user_id == user_id)
+
+    if status:
+        query = query.filter(LeaveRequest.status == status)
+
+    leaves = query.order_by(LeaveRequest.id.desc()).all()
+    return [build_leave_response(leave, db) for leave in leaves]
+
+
+# -----------------------
 # LEAVE REQUESTS - PENDING
 # -----------------------
 
@@ -1131,4 +1174,88 @@ def get_team_calendar(
         "year": year,
         "month": month,
         "events": [build_team_calendar_event(leave, db) for leave in leaves],
+    }
+
+
+
+# -----------------------
+# MANAGER DASHBOARD SUMMARY
+# -----------------------
+
+@app.get("/manager/dashboard-summary")
+def get_manager_dashboard_summary(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    if current_role not in ["kierownik", "admin", "kadry", "zarzad"]:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    today = date.today()
+    tomorrow = date.fromordinal(today.toordinal() + 1)
+
+    if current_role == "kierownik":
+        team_users = db.query(User).filter(
+            User.manager_user_id == current_user_id,
+            User.is_active == True,
+        ).all()
+
+        team_user_ids = [user.id for user in team_users]
+
+        if not team_user_ids:
+            return {
+                "team_count": 0,
+                "pending_requests_count": 0,
+                "today_absences": [],
+                "tomorrow_absences": [],
+                "upcoming_absences": [],
+            }
+
+        pending_requests = db.query(LeaveRequest).filter(
+            LeaveRequest.manager_id == current_user_id,
+            LeaveRequest.status == "pending",
+        ).all()
+
+        approved_leaves = db.query(LeaveRequest).filter(
+            LeaveRequest.user_id.in_(team_user_ids),
+            LeaveRequest.status == "approved",
+        ).order_by(LeaveRequest.start_date.asc()).all()
+
+    else:
+        team_users = db.query(User).filter(User.is_active == True).all()
+
+        pending_requests = db.query(LeaveRequest).filter(
+            LeaveRequest.status == "pending",
+        ).all()
+
+        approved_leaves = db.query(LeaveRequest).filter(
+            LeaveRequest.status == "approved",
+        ).order_by(LeaveRequest.start_date.asc()).all()
+
+    today_absences = [
+        build_team_calendar_event(leave, db)
+        for leave in approved_leaves
+        if is_leave_active_on_day(leave, today)
+    ]
+
+    tomorrow_absences = [
+        build_team_calendar_event(leave, db)
+        for leave in approved_leaves
+        if is_leave_active_on_day(leave, tomorrow)
+    ]
+
+    upcoming_absences = [
+        build_team_calendar_event(leave, db)
+        for leave in approved_leaves
+        if leave.start_date > today
+    ][:5]
+
+    return {
+        "team_count": len(team_users),
+        "pending_requests_count": len(pending_requests),
+        "today_absences": today_absences,
+        "tomorrow_absences": tomorrow_absences,
+        "upcoming_absences": upcoming_absences,
     }
