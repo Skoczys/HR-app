@@ -89,7 +89,14 @@ export default function LeaveRequests() {
       await loadLeaves();
     } catch (err) {
       console.error(err);
-      setError("Nie udało się dodać wniosku.");
+
+      const backendMessage = err?.response?.data?.detail;
+
+      if (backendMessage && typeof backendMessage === "string") {
+        setError(backendMessage);
+      } else {
+        setError("Nie udało się dodać wniosku.");
+      }
     } finally {
       setLoading(false);
     }

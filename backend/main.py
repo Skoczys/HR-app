@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine, Base
 from models.user import User
-from models.leave_request import LeaveRequest
+from models.leave_request import LeaveRequest, LeaveBalance
 from schemas.user import (
     UserCreate,
     UserUpdate,
@@ -20,6 +20,10 @@ from schemas.leave_request import (
     LeaveRequestCreate,
     LeaveRequestResponse,
     LeaveRequestDecision,
+    LeaveBalanceCreate,
+    LeaveBalanceUpdate,
+    LeaveBalanceResponse,
+
 )
 from security import (
     hash_password,
@@ -128,6 +132,76 @@ def build_leave_details_response(leave: LeaveRequest, db: Session):
         "decided_by_name": build_full_name(decided_by),
     }
 
+def build_leave_balance_response(balance: LeaveBalance, db: Session) -> LeaveBalanceResponse:
+    employee = db.query(User).filter(User.id == balance.user_id).first()
+
+    total_available_days = balance.base_limit_days + balance.carried_over_days
+    remaining_days = total_available_days - balance.used_days
+    remaining_on_demand_days = 4 - balance.on_demand_used_days
+
+    if remaining_days < 0:
+        remaining_days = 0
+
+    if remaining_on_demand_days < 0:
+        remaining_on_demand_days = 0
+
+    return LeaveBalanceResponse(
+        id=balance.id,
+        user_id=balance.user_id,
+        year=balance.year,
+        base_limit_days=balance.base_limit_days,
+        carried_over_days=balance.carried_over_days,
+        used_days=balance.used_days,
+        on_demand_used_days=balance.on_demand_used_days,
+        total_available_days=total_available_days,
+        remaining_days=remaining_days,
+        remaining_on_demand_days=remaining_on_demand_days,
+        employee_name=build_full_name(employee),
+        employee_department=employee.department if employee else None,
+        employee_job_title=employee.job_title if employee else None,
+    )
+
+def validate_leave_balance_for_request(
+    user_id: int,
+    leave_type: str,
+    total_days: int,
+    db: Session,
+    year: int,
+):
+    # Typy które schodzą z puli urlopowej
+    balance_required_types = ["wypoczynkowy", "na_zadanie"]
+
+    if leave_type not in balance_required_types:
+        return
+
+    balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == user_id,
+        LeaveBalance.year == year,
+    ).first()
+
+    if not balance:
+        raise HTTPException(
+            status_code=400,
+            detail="Brak salda urlopowego dla tego roku. Skontaktuj się z działem kadr.",
+        )
+
+    total_available_days = balance.base_limit_days + balance.carried_over_days
+    remaining_days = total_available_days - balance.used_days
+
+    if total_days > remaining_days:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Brak wystarczającego salda urlopowego. Pozostało {remaining_days} dni.",
+        )
+
+    if leave_type == "na_zadanie":
+        remaining_on_demand_days = 4 - balance.on_demand_used_days
+
+        if total_days > remaining_on_demand_days:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Brak wystarczającego limitu urlopu na żądanie. Pozostało {remaining_on_demand_days} dni.",
+            )
 
 # -----------------------
 # ROOT
@@ -545,12 +619,14 @@ def create_leave_request(
     user_id = int(current_user.get("sub"))
     manager_id = current_user.get("manager_user_id")
 
+    # Walidacja dat
     if leave_data.end_date < leave_data.start_date:
         raise HTTPException(
             status_code=400,
             detail="Data zakończenia nie może być wcześniejsza niż data rozpoczęcia",
         )
 
+    # Sprawdzenie przełożonego
     if manager_id is not None:
         manager = db.query(User).filter(
             User.id == manager_id,
@@ -560,6 +636,7 @@ def create_leave_request(
         if not manager:
             raise HTTPException(status_code=400, detail="Przełożony użytkownika nie istnieje")
 
+    # Sprawdzenie zastępującego
     if leave_data.substitute_id is not None:
         substitute = db.query(User).filter(
             User.id == leave_data.substitute_id,
@@ -569,6 +646,19 @@ def create_leave_request(
         if not substitute:
             raise HTTPException(status_code=400, detail="Wybrany zastępujący nie istnieje")
 
+    # Liczenie dni
+    total_days = calculate_leave_days(leave_data.start_date, leave_data.end_date)
+
+    #  KLUCZOWA WALIDACJA SALDA
+    validate_leave_balance_for_request(
+        user_id=user_id,
+        leave_type=leave_data.leave_type,
+        total_days=total_days,
+        db=db,
+        year=leave_data.start_date.year,
+    )
+
+    # Tworzenie wniosku
     leave = LeaveRequest(
         user_id=user_id,
         manager_id=manager_id,
@@ -762,3 +852,145 @@ def get_leave_request_details(
         raise HTTPException(status_code=403, detail="Brak uprawnień")
 
     return build_leave_details_response(leave, db)
+
+
+# -----------------------
+# LEAVE BALANCE - MY
+# -----------------------
+
+@app.get("/leave_balance/me", response_model=LeaveBalanceResponse)
+def get_my_leave_balance(
+    year: int = Query(default=date.today().year),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = int(current_user.get("sub"))
+
+    balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == user_id,
+        LeaveBalance.year == year,
+    ).first()
+
+    if not balance:
+        raise HTTPException(status_code=404, detail="Nie znaleziono salda urlopowego dla tego roku")
+
+    return build_leave_balance_response(balance, db)
+
+
+# -----------------------
+# LEAVE BALANCE - GET ONE USER
+# -----------------------
+
+@app.get("/leave_balance/{user_id}", response_model=LeaveBalanceResponse)
+def get_user_leave_balance(
+    user_id: int,
+    year: int = Query(default=date.today().year),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    if current_role in ["admin", "kadry", "zarzad"]:
+        pass
+    elif current_role == "kierownik":
+        employee = db.query(User).filter(
+            User.id == user_id,
+            User.is_active == True,
+        ).first()
+
+        if not employee:
+            raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+        if employee.id != current_user_id and employee.manager_user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+    else:
+        if user_id != current_user_id:
+            raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == user_id,
+        LeaveBalance.year == year,
+    ).first()
+
+    if not balance:
+        raise HTTPException(status_code=404, detail="Nie znaleziono salda urlopowego dla tego roku")
+
+    return build_leave_balance_response(balance, db)
+
+
+# -----------------------
+# LEAVE BALANCE - CREATE
+# -----------------------
+
+@app.post("/leave_balance", response_model=LeaveBalanceResponse)
+def create_leave_balance(
+    balance_data: LeaveBalanceCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+
+    if current_role not in ["admin", "kadry"]:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    user = db.query(User).filter(
+        User.id == balance_data.user_id,
+        User.is_active == True,
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+    existing_balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == balance_data.user_id,
+        LeaveBalance.year == balance_data.year,
+    ).first()
+
+    if existing_balance:
+        raise HTTPException(status_code=400, detail="Saldo dla tego użytkownika i roku już istnieje")
+
+    balance = LeaveBalance(
+        user_id=balance_data.user_id,
+        year=balance_data.year,
+        base_limit_days=balance_data.base_limit_days,
+        carried_over_days=balance_data.carried_over_days,
+        used_days=0,
+        on_demand_used_days=0,
+    )
+
+    db.add(balance)
+    db.commit()
+    db.refresh(balance)
+
+    return build_leave_balance_response(balance, db)
+
+
+# -----------------------
+# LEAVE BALANCE - UPDATE
+# -----------------------
+
+@app.put("/leave_balance/{balance_id}", response_model=LeaveBalanceResponse)
+def update_leave_balance(
+    balance_id: int,
+    balance_data: LeaveBalanceUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    current_role = current_user.get("role")
+
+    if current_role not in ["admin", "kadry"]:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    balance = db.query(LeaveBalance).filter(LeaveBalance.id == balance_id).first()
+
+    if not balance:
+        raise HTTPException(status_code=404, detail="Saldo urlopowe nie istnieje")
+
+    balance.base_limit_days = balance_data.base_limit_days
+    balance.carried_over_days = balance_data.carried_over_days
+
+    db.commit()
+    db.refresh(balance)
+
+    return build_leave_balance_response(balance, db)
