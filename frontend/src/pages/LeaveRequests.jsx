@@ -23,12 +23,16 @@ export default function LeaveRequests() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [selectedLeave, setSelectedLeave] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
   const loadLeaves = async () => {
     try {
       const res = await api.get("/leave_requests/history");
       setLeaves(res.data);
     } catch (err) {
       console.error(err);
+      setError("Nie udało się pobrać listy wniosków.");
     }
   };
 
@@ -84,18 +88,40 @@ export default function LeaveRequests() {
       setShowForm(false);
       await loadLeaves();
     } catch (err) {
-      setError("Nie udało się dodać wniosku");
       console.error(err);
+      setError("Nie udało się dodać wniosku.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePreview = async (leaveId) => {
+    setDetailsLoading(true);
+    setError("");
+
+    try {
+      const res = await api.get(`/leave_requests/${leaveId}`);
+      setSelectedLeave(res.data);
+    } catch (err) {
+      console.error(err);
+      setError("Nie udało się pobrać szczegółów wniosku.");
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const closePreview = () => {
+    setSelectedLeave(null);
   };
 
   return (
     <div className="leave-page">
       <div className="page-header">
         <h1 className="page-title">Moje wnioski</h1>
-        <button className="primary-button" onClick={() => setShowForm((prev) => !prev)}>
+        <button
+          className="primary-button"
+          onClick={() => setShowForm((prev) => !prev)}
+        >
           {showForm ? "Zamknij" : "Nowy wniosek"}
         </button>
       </div>
@@ -105,7 +131,9 @@ export default function LeaveRequests() {
           <div className="leave-form-top">
             <div>
               <h3>Nowy wniosek</h3>
-              <p className="section-muted">Wybierz typ i uzupełnij szczegóły wniosku.</p>
+              <p className="section-muted">
+                Wybierz typ i uzupełnij szczegóły wniosku.
+              </p>
             </div>
 
             <div className="leave-preview-badge">
@@ -119,7 +147,11 @@ export default function LeaveRequests() {
                 <button
                   key={type.value}
                   type="button"
-                  className={`leave-type-card ${form.leave_type === type.value ? "leave-type-card-active" : ""}`}
+                  className={`leave-type-card ${
+                    form.leave_type === type.value
+                      ? "leave-type-card-active"
+                      : ""
+                  }`}
                   onClick={() => handleTypeSelect(type.value)}
                 >
                   <span>{type.label}</span>
@@ -166,7 +198,8 @@ export default function LeaveRequests() {
                 <input
                   type="text"
                   value={
-                    leaveTypes.find((item) => item.value === form.leave_type)?.label || ""
+                    leaveTypes.find((item) => item.value === form.leave_type)
+                      ?.label || ""
                   }
                   placeholder="Wybierz typ z kafelków"
                   readOnly
@@ -188,7 +221,11 @@ export default function LeaveRequests() {
             {error && <div className="auth-error">{error}</div>}
 
             <div className="form-actions">
-              <button type="submit" className="primary-button" disabled={loading || !form.leave_type}>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={loading || !form.leave_type}
+              >
                 {loading ? "Zapisywanie..." : "Zapisz wniosek"}
               </button>
             </div>
@@ -196,28 +233,128 @@ export default function LeaveRequests() {
         </div>
       )}
 
+      {!showForm && error && <div className="auth-error">{error}</div>}
+
       <div className="leave-list">
         {leaves.length === 0 && <p className="empty-text">Brak wniosków</p>}
 
         {leaves.map((leave) => (
-          <div key={leave.id} className="leave-card">
+          <div key={leave.id} className="leave-card leave-card-decision">
             <div className="leave-left">
               <div className="leave-title">{leave.leave_type}</div>
               <div className="leave-dates">
                 {leave.start_date} → {leave.end_date}
               </div>
+              <div className="leave-extra">{leave.total_days} dni</div>
             </div>
 
-            <div className="leave-right">
+            <div className="leave-right leave-actions">
               <span className={`status-badge status-${leave.status}`}>
                 {leave.status}
               </span>
 
-              <span className="days-badge">{leave.total_days} dni</span>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => handlePreview(leave.id)}
+              >
+                Podgląd
+              </button>
             </div>
           </div>
         ))}
       </div>
+
+      {selectedLeave && (
+        <div className="modal-overlay" onClick={closePreview}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header">
+              <h2 className="page-title" style={{ marginBottom: 0 }}>
+                Szczegóły wniosku
+              </h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closePreview}
+              >
+                Zamknij
+              </button>
+            </div>
+
+            {detailsLoading ? (
+              <p>Ładowanie...</p>
+            ) : (
+              <div className="details-grid">
+                <div>
+                  <strong>Typ urlopu:</strong>
+                  <br />
+                  {selectedLeave.leave_type || "-"}
+                </div>
+
+                <div>
+                  <strong>Status:</strong>
+                  <br />
+                  {selectedLeave.status || "-"}
+                </div>
+
+                <div>
+                  <strong>Data od:</strong>
+                  <br />
+                  {selectedLeave.start_date || "-"}
+                </div>
+
+                <div>
+                  <strong>Data do:</strong>
+                  <br />
+                  {selectedLeave.end_date || "-"}
+                </div>
+
+                <div>
+                  <strong>Liczba dni:</strong>
+                  <br />
+                  {selectedLeave.total_days ?? "-"}
+                </div>
+
+                <div>
+                  <strong>Zastępujący:</strong>
+                  <br />
+                  {selectedLeave.substitute_name || "Brak"}
+                </div>
+
+                <div>
+                  <strong>Przełożony:</strong>
+                  <br />
+                  {selectedLeave.manager_name || "Brak"}
+                </div>
+
+                <div>
+                  <strong>Decyzję podjął:</strong>
+                  <br />
+                  {selectedLeave.decided_by_name || "Jeszcze brak"}
+                </div>
+
+                <div>
+                  <strong>Data decyzji:</strong>
+                  <br />
+                  {selectedLeave.decision_date || "Jeszcze brak"}
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Uwagi pracownika:</strong>
+                  <br />
+                  {selectedLeave.notes || "Brak"}
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Komentarz decyzji:</strong>
+                  <br />
+                  {selectedLeave.decision_comment || "Brak"}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

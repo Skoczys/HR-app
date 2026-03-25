@@ -16,7 +16,11 @@ from schemas.user import (
     UserPasswordReset,
     ChangeOwnPassword,
 )
-from schemas.leave_request import LeaveRequestCreate, LeaveRequestResponse
+from schemas.leave_request import (
+    LeaveRequestCreate,
+    LeaveRequestResponse,
+    LeaveRequestDecision,
+)
 from security import (
     hash_password,
     verify_password,
@@ -61,7 +65,18 @@ def calculate_leave_days(start_date, end_date):
     return (end_date - start_date).days + 1
 
 
-def build_leave_response(leave: LeaveRequest) -> LeaveRequestResponse:
+def build_full_name(user: User | None):
+    if not user:
+        return None
+    return f"{user.first_name} {user.last_name}"
+
+
+def build_leave_response(leave: LeaveRequest, db: Session) -> LeaveRequestResponse:
+    employee = db.query(User).filter(User.id == leave.user_id).first()
+    manager = db.query(User).filter(User.id == leave.manager_id).first() if leave.manager_id else None
+    substitute = db.query(User).filter(User.id == leave.substitute_id).first() if leave.substitute_id else None
+    decided_by = db.query(User).filter(User.id == leave.decided_by_user_id).first() if leave.decided_by_user_id else None
+
     return LeaveRequestResponse(
         id=leave.id,
         user_id=leave.user_id,
@@ -73,39 +88,43 @@ def build_leave_response(leave: LeaveRequest) -> LeaveRequestResponse:
         status=leave.status,
         notes=leave.notes,
         total_days=calculate_leave_days(leave.start_date, leave.end_date),
+        decision_comment=leave.decision_comment,
+        decided_by_user_id=leave.decided_by_user_id,
+        decision_date=leave.decision_date,
+        employee_name=build_full_name(employee),
+        employee_department=employee.department if employee else None,
+        employee_job_title=employee.job_title if employee else None,
+        manager_name=build_full_name(manager),
+        substitute_name=build_full_name(substitute),
+        decided_by_name=build_full_name(decided_by),
     )
-
-
-def build_full_name(user: User | None):
-    if not user:
-        return None
-    return f"{user.first_name} {user.last_name}"
 
 
 def build_leave_details_response(leave: LeaveRequest, db: Session):
     employee = db.query(User).filter(User.id == leave.user_id).first()
     manager = db.query(User).filter(User.id == leave.manager_id).first() if leave.manager_id else None
     substitute = db.query(User).filter(User.id == leave.substitute_id).first() if leave.substitute_id else None
-
-    decided_by = None
-    if hasattr(leave, "decided_by_user_id") and leave.decided_by_user_id:
-        decided_by = db.query(User).filter(User.id == leave.decided_by_user_id).first()
+    decided_by = db.query(User).filter(User.id == leave.decided_by_user_id).first() if leave.decided_by_user_id else None
 
     return {
         "id": leave.id,
+        "user_id": leave.user_id,
+        "manager_id": leave.manager_id,
+        "substitute_id": leave.substitute_id,
         "status": leave.status,
         "leave_type": leave.leave_type,
         "start_date": leave.start_date,
         "end_date": leave.end_date,
         "total_days": calculate_leave_days(leave.start_date, leave.end_date),
         "notes": leave.notes,
+        "decision_comment": leave.decision_comment,
+        "decided_by_user_id": leave.decided_by_user_id,
+        "decision_date": leave.decision_date,
         "employee_name": build_full_name(employee),
         "employee_department": employee.department if employee else None,
         "employee_job_title": employee.job_title if employee else None,
         "manager_name": build_full_name(manager),
         "substitute_name": build_full_name(substitute),
-        "decision_comment": getattr(leave, "decision_comment", None),
-        "decision_date": getattr(leave, "decision_date", None),
         "decided_by_name": build_full_name(decided_by),
     }
 
@@ -257,7 +276,7 @@ def get_users(
 ):
     current_role = current_user.get("role")
     current_email = current_user.get("email")
-    current_department = current_user.get("department")
+    current_user_id = int(current_user.get("sub"))
 
     query = db.query(User)
 
@@ -267,7 +286,12 @@ def get_users(
     if current_role in ["admin", "kadry", "zarzad"]:
         pass
     elif current_role == "kierownik":
-        query = query.filter(User.department == current_department)
+        query = query.filter(
+            or_(
+                User.manager_user_id == current_user_id,
+                User.id == current_user_id,
+            )
+        )
     else:
         query = query.filter(User.email == current_email)
 
@@ -336,6 +360,9 @@ def update_user(
         raise HTTPException(status_code=400, detail="Email już istnieje")
 
     if user_data.manager_user_id is not None:
+        if user_data.manager_user_id == user_id:
+            raise HTTPException(status_code=400, detail="Użytkownik nie może być swoim własnym przełożonym")
+
         manager = db.query(User).filter(
             User.id == user_data.manager_user_id,
             User.is_active == True,
@@ -424,7 +451,7 @@ def get_user(
 ):
     current_role = current_user.get("role")
     current_email = current_user.get("email")
-    current_department = current_user.get("department")
+    current_user_id = int(current_user.get("sub"))
 
     user = db.query(User).filter(
         User.id == user_id,
@@ -438,8 +465,12 @@ def get_user(
         return user
 
     if current_role == "kierownik":
-        if user.department != current_department:
+        if user.id == current_user_id:
+            return user
+
+        if user.manager_user_id != current_user_id:
             raise HTTPException(status_code=403, detail="Brak uprawnień")
+
         return user
 
     if user.email != current_email:
@@ -553,7 +584,7 @@ def create_leave_request(
     db.commit()
     db.refresh(leave)
 
-    return build_leave_response(leave)
+    return build_leave_response(leave, db)
 
 
 # -----------------------
@@ -569,9 +600,9 @@ def get_my_leave_requests(
 
     leaves = db.query(LeaveRequest).filter(
         LeaveRequest.user_id == user_id
-    ).all()
+    ).order_by(LeaveRequest.id.desc()).all()
 
-    return [build_leave_response(leave) for leave in leaves]
+    return [build_leave_response(leave, db) for leave in leaves]
 
 
 # -----------------------
@@ -589,12 +620,12 @@ def get_pending_leave_requests(
     query = db.query(LeaveRequest).filter(LeaveRequest.status == "pending")
 
     if current_role in ["admin", "kadry", "zarzad"]:
-        leaves = query.all()
-        return [build_leave_response(leave) for leave in leaves]
+        leaves = query.order_by(LeaveRequest.id.desc()).all()
+        return [build_leave_response(leave, db) for leave in leaves]
 
     if current_role == "kierownik":
-        leaves = query.filter(LeaveRequest.manager_id == current_user_id).all()
-        return [build_leave_response(leave) for leave in leaves]
+        leaves = query.filter(LeaveRequest.manager_id == current_user_id).order_by(LeaveRequest.id.desc()).all()
+        return [build_leave_response(leave, db) for leave in leaves]
 
     raise HTTPException(status_code=403, detail="Brak uprawnień")
 
@@ -606,8 +637,7 @@ def get_pending_leave_requests(
 @app.patch("/leave_requests/{leave_id}/decision")
 def decide_leave_request(
     leave_id: int,
-    decision: str,
-    decision_comment: str | None = Query(default=None),
+    decision_data: LeaveRequestDecision,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -625,24 +655,18 @@ def decide_leave_request(
     elif current_role not in ["admin", "kadry", "zarzad"]:
         raise HTTPException(status_code=403, detail="Brak uprawnień")
 
-    if decision not in ["approved", "rejected"]:
-        raise HTTPException(status_code=400, detail="Zła decyzja")
+    if leave.status != "pending":
+        raise HTTPException(status_code=400, detail="Ten wniosek został już rozpatrzony")
 
-    leave.status = decision
-
-    if hasattr(leave, "decision_comment"):
-        leave.decision_comment = decision_comment
-
-    if hasattr(leave, "decided_by_user_id"):
-        leave.decided_by_user_id = current_user_id
-
-    if hasattr(leave, "decision_date"):
-        leave.decision_date = date.today()
+    leave.status = decision_data.decision
+    leave.decision_comment = decision_data.decision_comment
+    leave.decided_by_user_id = current_user_id
+    leave.decision_date = date.today()
 
     db.commit()
     db.refresh(leave)
 
-    return {"message": f"Wniosek {decision}"}
+    return {"message": f"Wniosek {decision_data.decision}"}
 
 
 # -----------------------
@@ -671,7 +695,7 @@ def get_leave_requests_history(
         query = query.filter(LeaveRequest.status == status)
 
     leaves = query.order_by(LeaveRequest.id.desc()).all()
-    return [build_leave_response(leave) for leave in leaves]
+    return [build_leave_response(leave, db) for leave in leaves]
 
 
 # -----------------------

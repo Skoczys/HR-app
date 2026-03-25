@@ -69,26 +69,38 @@ export default function PendingLeaves() {
     setError("");
 
     try {
-      await api.patch(`/leave_requests/${decisionLeaveId}/decision`, null, {
-        params: {
-          decision: decisionType,
-          decision_comment: decisionComment.trim() || null,
-        },
-      });
+      const payload = {
+        decision: decisionType,
+        decision_comment: decisionComment.trim() || null,
+      };
+
+      await api.patch(`/leave_requests/${decisionLeaveId}/decision`, payload);
 
       if (selectedLeave?.id === decisionLeaveId) {
-        setSelectedLeave({
-          ...selectedLeave,
+        setSelectedLeave((prev) => ({
+          ...prev,
           status: decisionType,
           decision_comment: decisionComment.trim() || null,
-        });
+          decision_date: new Date().toISOString().slice(0, 10),
+        }));
       }
 
       closeDecisionModal();
       await loadLeaves();
     } catch (err) {
       console.error(err);
-      setError("Nie udało się zapisać decyzji.");
+
+      const backendMessage = err?.response?.data?.detail;
+
+      if (backendMessage) {
+        setError(
+          Array.isArray(backendMessage)
+            ? "Nie udało się zapisać decyzji."
+            : backendMessage
+        );
+      } else {
+        setError("Nie udało się zapisać decyzji.");
+      }
     } finally {
       setLoadingId(null);
     }
