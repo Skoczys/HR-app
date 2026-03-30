@@ -14,6 +14,7 @@ export default function UserDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
 
+  const [profile, setProfile] = useState(null);
   const [user, setUser] = useState(null);
   const [balance, setBalance] = useState(null);
   const [leaves, setLeaves] = useState([]);
@@ -22,7 +23,47 @@ export default function UserDetailsPage() {
   const [leavesLoading, setLeavesLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
 
+  const [editBalanceOpen, setEditBalanceOpen] = useState(false);
+  const [balanceForm, setBalanceForm] = useState({
+    base_limit_days: 0,
+    carried_over_days: 0,
+  });
+  const [balanceSaving, setBalanceSaving] = useState(false);
+
+  const [createBalanceOpen, setCreateBalanceOpen] = useState(false);
+  const [createBalanceForm, setCreateBalanceForm] = useState({
+    base_limit_days: 20,
+    carried_over_days: 0,
+  });
+  const [createBalanceLoading, setCreateBalanceLoading] = useState(false);
+
   const currentYear = new Date().getFullYear();
+
+  const canManageBalance =
+    profile?.role === "admin" || profile?.role === "kadry";
+
+  const loadProfile = async () => {
+    try {
+      const res = await api.get("/me");
+      setProfile(res.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadBalance = async () => {
+    try {
+      const balanceRes = await api.get(`/leave_balance/${id}?year=${currentYear}`);
+      setBalance(balanceRes.data);
+      setBalanceForm({
+        base_limit_days: balanceRes.data.base_limit_days,
+        carried_over_days: balanceRes.data.carried_over_days,
+      });
+    } catch (err) {
+      console.error(err);
+      setBalance(null);
+    }
+  };
 
   const loadLeaves = async (selectedStatus = "all") => {
     setLeavesLoading(true);
@@ -50,16 +91,12 @@ export default function UserDetailsPage() {
       setError("");
 
       try {
+        await loadProfile();
+
         const userRes = await api.get(`/users/${id}`);
         setUser(userRes.data);
 
-        try {
-          const balanceRes = await api.get(`/leave_balance/${id}?year=${currentYear}`);
-          setBalance(balanceRes.data);
-        } catch {
-          setBalance(null);
-        }
-
+        await loadBalance();
         await loadLeaves(statusFilter);
       } catch (err) {
         console.error(err);
@@ -75,7 +112,95 @@ export default function UserDetailsPage() {
   useEffect(() => {
     if (!user) return;
     loadLeaves(statusFilter);
-  }, [statusFilter]);
+  }, [statusFilter, user]);
+
+  const openBalanceEdit = () => {
+    if (!balance) return;
+
+    setBalanceForm({
+      base_limit_days: balance.base_limit_days,
+      carried_over_days: balance.carried_over_days,
+    });
+    setEditBalanceOpen(true);
+  };
+
+  const closeBalanceEdit = () => {
+    setEditBalanceOpen(false);
+  };
+
+  const handleBalanceFormChange = (e) => {
+    const { name, value } = e.target;
+
+    setBalanceForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleSaveBalance = async () => {
+    if (!balance) return;
+
+    setBalanceSaving(true);
+    setError("");
+
+    try {
+      await api.put(`/leave_balance/${balance.id}`, {
+        base_limit_days: Number(balanceForm.base_limit_days),
+        carried_over_days: Number(balanceForm.carried_over_days),
+      });
+
+      await loadBalance();
+      setEditBalanceOpen(false);
+    } catch (err) {
+      console.error(err);
+      setError("Nie udało się zapisać salda urlopowego.");
+    } finally {
+      setBalanceSaving(false);
+    }
+  };
+
+  const openCreateBalance = () => {
+    setCreateBalanceForm({
+      base_limit_days: 20,
+      carried_over_days: 0,
+    });
+    setCreateBalanceOpen(true);
+  };
+
+  const closeCreateBalance = () => {
+    setCreateBalanceOpen(false);
+  };
+
+  const handleCreateBalanceFormChange = (e) => {
+    const { name, value } = e.target;
+
+    setCreateBalanceForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleCreateBalance = async () => {
+    setCreateBalanceLoading(true);
+    setError("");
+
+    try {
+      await api.post("/leave_balance", {
+        user_id: Number(id),
+        year: currentYear,
+        base_limit_days: Number(createBalanceForm.base_limit_days),
+        carried_over_days: Number(createBalanceForm.carried_over_days),
+      });
+
+      await loadBalance();
+      setCreateBalanceOpen(false);
+    } catch (err) {
+      console.error(err);
+      setError("Nie udało się utworzyć salda urlopowego.");
+    } finally {
+      setCreateBalanceLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -86,7 +211,7 @@ export default function UserDetailsPage() {
     );
   }
 
-  if (error) {
+  if (error && !user) {
     return (
       <div className="user-details-page">
         <div className="page-header">
@@ -127,6 +252,8 @@ export default function UserDetailsPage() {
           Wróć
         </button>
       </div>
+
+      {error && <div className="auth-error">{error}</div>}
 
       <div className="summary-grid">
         <div className="summary-card">
@@ -188,10 +315,32 @@ export default function UserDetailsPage() {
         </div>
 
         <div className="user-details-card">
-          <h3>Saldo urlopowe ({currentYear})</h3>
+          <div className="page-header" style={{ marginBottom: "16px" }}>
+            <h3 style={{ margin: 0 }}>Saldo urlopowe ({currentYear})</h3>
+
+            {canManageBalance && balance && (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={openBalanceEdit}
+              >
+                Edytuj saldo
+              </button>
+            )}
+          </div>
 
           {balance ? (
             <div className="user-details-list">
+              <div className="user-details-row user-details-row-highlight">
+                <strong>Pozostało do wykorzystania</strong>
+                <span>{balance.remaining_days} dni</span>
+              </div>
+
+              <div className="user-details-row">
+                <strong>Wykorzystane</strong>
+                <span>{balance.used_days} dni</span>
+              </div>
+
               <div className="user-details-row">
                 <strong>Limit podstawowy</strong>
                 <span>{balance.base_limit_days} dni</span>
@@ -203,29 +352,32 @@ export default function UserDetailsPage() {
               </div>
 
               <div className="user-details-row">
-                <strong>Wykorzystane</strong>
-                <span>{balance.used_days} dni</span>
-              </div>
-
-              <div className="user-details-row">
-                <strong>Pozostało</strong>
-                <span>{balance.remaining_days} dni</span>
+                <strong>Na żądanie pozostało</strong>
+                <span>{balance.remaining_on_demand_days} dni</span>
               </div>
 
               <div className="user-details-row">
                 <strong>Na żądanie wykorzystane</strong>
                 <span>{balance.on_demand_used_days} dni</span>
               </div>
-
-              <div className="user-details-row">
-                <strong>Na żądanie pozostało</strong>
-                <span>{balance.remaining_on_demand_days} dni</span>
-              </div>
             </div>
           ) : (
-            <div className="section-muted">
-              Brak salda urlopowego dla tego roku.
-            </div>
+            <>
+              <div className="section-muted">
+                Brak salda urlopowego dla tego roku.
+              </div>
+
+              {canManageBalance && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ marginTop: "12px" }}
+                  onClick={openCreateBalance}
+                >
+                  Utwórz saldo
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -307,6 +459,110 @@ export default function UserDetailsPage() {
           </div>
         )}
       </div>
+
+      {editBalanceOpen && balance && (
+        <div className="modal-overlay" onClick={closeBalanceEdit}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header">
+              <h2 style={{ margin: 0 }}>Edycja salda urlopowego</h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closeBalanceEdit}
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <div>
+                <label>Limit podstawowy</label>
+                <input
+                  type="number"
+                  name="base_limit_days"
+                  min="0"
+                  value={balanceForm.base_limit_days}
+                  onChange={handleBalanceFormChange}
+                />
+              </div>
+
+              <div>
+                <label>Przeniesione dni</label>
+                <input
+                  type="number"
+                  name="carried_over_days"
+                  min="0"
+                  value={balanceForm.carried_over_days}
+                  onChange={handleBalanceFormChange}
+                />
+              </div>
+            </div>
+
+            <div className="form-actions" style={{ marginTop: "20px" }}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleSaveBalance}
+                disabled={balanceSaving}
+              >
+                {balanceSaving ? "Zapisywanie..." : "Zapisz saldo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createBalanceOpen && (
+        <div className="modal-overlay" onClick={closeCreateBalance}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header">
+              <h2 style={{ margin: 0 }}>Utwórz saldo urlopowe</h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closeCreateBalance}
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <div>
+                <label>Limit podstawowy</label>
+                <input
+                  type="number"
+                  name="base_limit_days"
+                  min="0"
+                  value={createBalanceForm.base_limit_days}
+                  onChange={handleCreateBalanceFormChange}
+                />
+              </div>
+
+              <div>
+                <label>Przeniesione dni</label>
+                <input
+                  type="number"
+                  name="carried_over_days"
+                  min="0"
+                  value={createBalanceForm.carried_over_days}
+                  onChange={handleCreateBalanceFormChange}
+                />
+              </div>
+            </div>
+
+            <div className="form-actions" style={{ marginTop: "20px" }}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleCreateBalance}
+                disabled={createBalanceLoading}
+              >
+                {createBalanceLoading ? "Tworzenie..." : "Utwórz saldo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

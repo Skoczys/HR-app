@@ -1447,3 +1447,26 @@ button:disabled {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+.user-details-card .leave-list {
+  margin-top: 8px;
+}
+
+.user-details-card .leave-card {
+  box-shadow: none;
+  border: 1px solid #e7ebf0;
+}
+
+.user-details-row-highlight {
+  background: rgba(147, 177, 38, 0.08);
+  border: 1px solid rgba(147, 177, 38, 0.18);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.user-details-row-highlight strong,
+.user-details-row-highlight span {
+  color: #5f7c12;
+  font-weight: 800;
+}
