@@ -9,6 +9,7 @@ import ChangePassword from "./pages/ChangePassword";
 import TeamCalendar from "./pages/TeamCalendar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppLayout from "./layout/AppLayout";
+import MyProfilePage from "./pages/MyProfilePage";
 import { getToken, getMustChangePassword } from "./services/auth";
 
 export default function App() {
@@ -108,6 +109,17 @@ export default function App() {
                 <UsersPage />
               </AppLayout>
             )}
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/my-profile"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <MyProfilePage />
+            </AppLayout>
           </ProtectedRoute>
         }
       />

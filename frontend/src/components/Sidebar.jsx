@@ -10,6 +10,7 @@ export default function Sidebar({ profile }) {
       <nav className="sidebar-nav">
         <Link to="/dashboard">Dashboard</Link>
         <Link to="/leave">Wnioski</Link>
+        <Link to="/my-profile">Mój profil</Link>
 
         {(role === "kierownik" || role === "kadry" || role === "zarzad" || role === "admin") && (
           <Link to="/leave/pending">Do akceptacji</Link>
