@@ -1470,3 +1470,11 @@ button:disabled {
   color: #5f7c12;
   font-weight: 800;
 }
+
+.user-balance-box {
+  margin-top: 24px;
+  padding: 20px;
+  background: #f8fafc;
+  border: 1px solid #e7ebf0;
+  border-radius: 16px;
+}
