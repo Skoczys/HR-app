@@ -14,6 +14,7 @@ class UserCreate(BaseModel):
     role: str
     job_title: str | None = None
     manager_user_id: int | None = None
+    leave_seniority_years: int
     hire_date: date
     email: EmailStr
     password: str
@@ -31,6 +32,7 @@ class UserUpdate(BaseModel):
     role: str
     job_title: str | None = None
     manager_user_id: int | None = None
+    leave_seniority_years: int
     hire_date: date
     email: EmailStr
     password: str | None = None
@@ -49,6 +51,7 @@ class UserResponse(BaseModel):
     role: str
     job_title: str | None
     manager_user_id: int | None
+    leave_seniority_years: int
     hire_date: date
     email: EmailStr
     is_active: bool
@@ -57,12 +60,14 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 # -----------------------
 # SCHEMAT ZMIANY WLASNEGO HASLA
 # -----------------------
 
 class UserPasswordReset(BaseModel):
     new_password: str
+
 
 class ChangeOwnPassword(BaseModel):
     old_password: str

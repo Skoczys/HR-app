@@ -9,13 +9,30 @@ const initialForm = {
   role: "",
   job_title: "",
   manager_user_id: "",
+  leave_seniority_years: "",
   hire_date: "",
   email: "",
   password: "",
 };
 
+const roleOptions = [
+  { value: "pracownik", label: "Pracownik" },
+  { value: "kierownik", label: "Kierownik" },
+  { value: "kadry", label: "Kadry" },
+  { value: "zarzad", label: "Zarząd" },
+  { value: "admin", label: "Admin" },
+];
+
+const departmentOptions = [
+  { value: "IT", label: "IT" },
+  { value: "HR", label: "HR" },
+  { value: "Finanse", label: "Finanse" },
+  { value: "Produkcja", label: "Produkcja" },
+];
+
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
+  const [managers, setManagers] = useState([]);
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState("");
   const [loadingId, setLoadingId] = useState(null);
@@ -34,6 +51,7 @@ export default function UsersPage() {
 
   const isAdmin = profile?.role === "admin";
   const isManager = profile?.role === "kierownik";
+
   const canViewUsers =
     profile?.role === "admin" ||
     profile?.role === "kadry" ||
@@ -61,6 +79,22 @@ export default function UsersPage() {
     }
   };
 
+  const loadManagers = async () => {
+    try {
+      const res = await api.get("/users", {
+        params: { is_active: true },
+      });
+
+      const filteredManagers = res.data.filter((user) =>
+        ["kierownik", "kadry", "zarzad", "admin"].includes(user.role)
+      );
+
+      setManagers(filteredManagers);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const loadProfile = async () => {
     try {
       const res = await api.get("/me");
@@ -79,6 +113,12 @@ export default function UsersPage() {
       loadUsers();
     }
   }, [filters, profile]);
+
+  useEffect(() => {
+    if (canManageUsers) {
+      loadManagers();
+    }
+  }, [canManageUsers]);
 
   const handleDeactivate = async (userId) => {
     setLoadingId(userId);
@@ -144,7 +184,11 @@ export default function UsersPage() {
       department: user.department || "",
       role: user.role || "",
       job_title: user.job_title || "",
-      manager_user_id: user.manager_user_id || "",
+      manager_user_id: user.manager_user_id ? String(user.manager_user_id) : "",
+      leave_seniority_years:
+        user.leave_seniority_years !== undefined && user.leave_seniority_years !== null
+          ? String(user.leave_seniority_years)
+          : "",
       hire_date: user.hire_date || "",
       email: user.email || "",
       password: "",
@@ -173,6 +217,7 @@ export default function UsersPage() {
         role: form.role,
         job_title: form.job_title || null,
         manager_user_id: form.manager_user_id ? Number(form.manager_user_id) : null,
+        leave_seniority_years: Number(form.leave_seniority_years),
         hire_date: form.hire_date,
         email: form.email,
       };
@@ -193,6 +238,7 @@ export default function UsersPage() {
 
       closeForm();
       await loadUsers();
+      await loadManagers();
     } catch (err) {
       setError("Nie udało się zapisać pracownika");
       console.error(err);
@@ -269,22 +315,36 @@ export default function UsersPage() {
 
               <div>
                 <label>Dział</label>
-                <input
+                <select
                   name="department"
                   value={form.department}
                   onChange={handleFormChange}
                   required
-                />
+                >
+                  <option value="">Wybierz dział</option>
+                  {departmentOptions.map((department) => (
+                    <option key={department.value} value={department.value}>
+                      {department.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label>Rola</label>
-                <input
+                <select
                   name="role"
                   value={form.role}
                   onChange={handleFormChange}
                   required
-                />
+                >
+                  <option value="">Wybierz rolę</option>
+                  {roleOptions.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -297,12 +357,30 @@ export default function UsersPage() {
               </div>
 
               <div>
-                <label>ID przełożonego</label>
-                <input
+                <label>Przełożony</label>
+                <select
                   name="manager_user_id"
-                  type="number"
                   value={form.manager_user_id}
                   onChange={handleFormChange}
+                >
+                  <option value="">Brak</option>
+                  {managers.map((manager) => (
+                    <option key={manager.id} value={manager.id}>
+                      {manager.first_name} {manager.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Lata do urlopu</label>
+                <input
+                  name="leave_seniority_years"
+                  type="number"
+                  min="0"
+                  value={form.leave_seniority_years}
+                  onChange={handleFormChange}
+                  required
                 />
               </div>
 
@@ -349,8 +427,8 @@ export default function UsersPage() {
                 {formLoading
                   ? "Zapisywanie..."
                   : editingUserId
-                  ? "Zapisz zmiany"
-                  : "Dodaj pracownika"}
+                    ? "Zapisz zmiany"
+                    : "Dodaj pracownika"}
               </button>
             </div>
           </form>

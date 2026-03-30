@@ -282,6 +282,36 @@ def build_team_calendar_event(leave: LeaveRequest, db: Session):
 def is_leave_active_on_day(leave: LeaveRequest, target_day: date) -> bool:
     return leave.start_date <= target_day <= leave.end_date
 
+def calculate_base_leave_limit(leave_seniority_years: int) -> int:
+    if leave_seniority_years >= 10:
+        return 26
+    return 20
+
+
+def create_initial_leave_balance_for_user(user_id: int, leave_seniority_years: int, db: Session):
+    current_year = date.today().year
+
+    existing_balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == user_id,
+        LeaveBalance.year == current_year,
+    ).first()
+
+    if existing_balance:
+        return
+
+    base_limit_days = calculate_base_leave_limit(leave_seniority_years)
+
+    balance = LeaveBalance(
+        user_id=user_id,
+        year=current_year,
+        base_limit_days=base_limit_days,
+        carried_over_days=0,
+        used_days=0,
+        on_demand_used_days=0,
+    )
+
+    db.add(balance)
+
 # -----------------------
 # ROOT
 # -----------------------
@@ -369,6 +399,9 @@ def create_user(
     if current_role == "kadry" and user.role == "admin":
         raise HTTPException(status_code=403, detail="Kadry nie mogą nadawać roli admin")
 
+    if user.leave_seniority_years < 0:
+        raise HTTPException(status_code=400, detail="Lata do urlopu nie mogą być ujemne")
+
     existing_employee_number = (
         db.query(User)
         .filter(User.employee_number == user.employee_number)
@@ -400,6 +433,7 @@ def create_user(
         role=user.role,
         job_title=user.job_title,
         manager_user_id=user.manager_user_id,
+        leave_seniority_years=user.leave_seniority_years,
         hire_date=user.hire_date,
         email=user.email,
         password=hashed_password,
@@ -408,6 +442,15 @@ def create_user(
     )
 
     db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    create_initial_leave_balance_for_user(
+        user_id=db_user.id,
+        leave_seniority_years=db_user.leave_seniority_years,
+        db=db,
+    )
+
     db.commit()
     db.refresh(db_user)
 
@@ -489,6 +532,9 @@ def update_user(
 
     if current_role == "kadry" and user_data.role == "admin":
         raise HTTPException(status_code=403, detail="Kadry nie mogą nadawać roli admin")
+    
+    if user_data.leave_seniority_years < 0:
+        raise HTTPException(status_code=400, detail="Lata do urlopu nie mogą być ujemne")
 
     existing_employee_number = (
         db.query(User)
@@ -531,6 +577,7 @@ def update_user(
     user.role = user_data.role
     user.job_title = user_data.job_title
     user.manager_user_id = user_data.manager_user_id
+    user.leave_seniority_years = user_data.leave_seniority_years
     user.hire_date = user_data.hire_date
     user.email = user_data.email
 
