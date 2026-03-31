@@ -10,6 +10,26 @@ const leaveTypeLabels = {
   bezplatny: "Bezpłatny",
 };
 
+const documentTypeLabels = {
+  umowa: "Umowa",
+  aneks: "Aneks",
+  pit: "PIT",
+  badania: "Badania",
+  bhp: "BHP",
+  ppk: "PPK",
+  inne: "Inne",
+};
+
+const documentTypeOptions = [
+  { value: "umowa", label: "Umowa" },
+  { value: "aneks", label: "Aneks" },
+  { value: "pit", label: "PIT" },
+  { value: "badania", label: "Badania" },
+  { value: "bhp", label: "BHP" },
+  { value: "ppk", label: "PPK" },
+  { value: "inne", label: "Inne" },
+];
+
 export default function UserDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -18,9 +38,15 @@ export default function UserDetailsPage() {
   const [user, setUser] = useState(null);
   const [balance, setBalance] = useState(null);
   const [leaves, setLeaves] = useState([]);
+  const [documents, setDocuments] = useState([]);
+
   const [error, setError] = useState("");
+  const [documentsError, setDocumentsError] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [leavesLoading, setLeavesLoading] = useState(false);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [editBalanceOpen, setEditBalanceOpen] = useState(false);
@@ -37,9 +63,22 @@ export default function UserDetailsPage() {
   });
   const [createBalanceLoading, setCreateBalanceLoading] = useState(false);
 
+  const [addDocumentOpen, setAddDocumentOpen] = useState(false);
+  const [documentForm, setDocumentForm] = useState({
+    document_type: "umowa",
+    title: "",
+    description: "",
+    file: null,
+  });
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = useState(null);
+
   const currentYear = new Date().getFullYear();
 
   const canManageBalance =
+    profile?.role === "admin" || profile?.role === "kadry";
+
+  const canManageDocuments =
     profile?.role === "admin" || profile?.role === "kadry";
 
   const loadProfile = async () => {
@@ -85,6 +124,22 @@ export default function UserDetailsPage() {
     }
   };
 
+  const loadDocuments = async () => {
+    setDocumentsLoading(true);
+    setDocumentsError("");
+
+    try {
+      const res = await api.get(`/users/${id}/documents`);
+      setDocuments(res.data || []);
+    } catch (err) {
+      console.error(err);
+      setDocuments([]);
+      setDocumentsError("Nie udało się pobrać dokumentów.");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -96,8 +151,11 @@ export default function UserDetailsPage() {
         const userRes = await api.get(`/users/${id}`);
         setUser(userRes.data);
 
-        await loadBalance();
-        await loadLeaves(statusFilter);
+        await Promise.all([
+          loadBalance(),
+          loadLeaves(statusFilter),
+          loadDocuments(),
+        ]);
       } catch (err) {
         console.error(err);
         setError("Nie udało się pobrać danych pracownika.");
@@ -199,6 +257,109 @@ export default function UserDetailsPage() {
       setError("Nie udało się utworzyć salda urlopowego.");
     } finally {
       setCreateBalanceLoading(false);
+    }
+  };
+
+  const openAddDocument = () => {
+    setDocumentForm({
+      document_type: "umowa",
+      title: "",
+      description: "",
+      file: null,
+    });
+    setDocumentsError("");
+    setAddDocumentOpen(true);
+  };
+
+  const closeAddDocument = () => {
+    setAddDocumentOpen(false);
+  };
+
+  const handleDocumentFormChange = (e) => {
+    const { name, value } = e.target;
+
+    setDocumentForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleDocumentFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+
+    setDocumentForm((prev) => ({
+      ...prev,
+      file,
+    }));
+  };
+
+  const handleAddDocument = async () => {
+    if (!documentForm.file) {
+      setDocumentsError("Wybierz plik dokumentu.");
+      return;
+    }
+
+    setDocumentSaving(true);
+    setDocumentsError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("document_type", documentForm.document_type);
+      formData.append("title", documentForm.title);
+      formData.append("description", documentForm.description);
+      formData.append("file", documentForm.file);
+
+      await api.post(`/users/${id}/documents`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      await loadDocuments();
+      setAddDocumentOpen(false);
+    } catch (err) {
+      console.error(err);
+      setDocumentsError("Nie udało się dodać dokumentu.");
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
+  const handleDownloadDocument = async (documentId, originalFileName) => {
+    try {
+      const response = await api.get(`/documents/${documentId}/download`, {
+        responseType: "blob",
+      });
+
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = originalFileName || "dokument";
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      setDocumentsError("Nie udało się pobrać dokumentu.");
+    }
+  };
+
+  const handleDeleteDocument = async (documentId) => {
+    setDeletingDocumentId(documentId);
+    setDocumentsError("");
+
+    try {
+      await api.delete(`/documents/${documentId}`);
+      await loadDocuments();
+    } catch (err) {
+      console.error(err);
+      setDocumentsError("Nie udało się usunąć dokumentu.");
+    } finally {
+      setDeletingDocumentId(null);
     }
   };
 
@@ -384,6 +545,77 @@ export default function UserDetailsPage() {
 
       <div className="user-details-card">
         <div className="page-header" style={{ marginBottom: "16px" }}>
+          <h3 style={{ margin: 0 }}>Dokumenty pracownika</h3>
+
+          {canManageDocuments && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={openAddDocument}
+            >
+              Dodaj dokument
+            </button>
+          )}
+        </div>
+
+        {documentsError && <div className="auth-error">{documentsError}</div>}
+
+        {documentsLoading ? (
+          <div className="section-muted">Ładowanie dokumentów...</div>
+        ) : documents.length === 0 ? (
+          <div className="section-muted">Brak dokumentów pracownika.</div>
+        ) : (
+          <div className="documents-list">
+            {documents.map((document) => (
+              <div key={document.id} className="document-card">
+                <div className="document-left">
+                  <div className="document-title">{document.title}</div>
+                  <div className="document-meta">
+                    Typ: {documentTypeLabels[document.document_type] || document.document_type}
+                  </div>
+                  <div className="document-meta">
+                    Plik: {document.original_file_name}
+                  </div>
+                  {document.description && (
+                    <div className="document-meta">
+                      Opis: {document.description}
+                    </div>
+                  )}
+                  <div className="document-meta">
+                    Dodał: {document.uploaded_by_name || "-"}
+                  </div>
+                </div>
+
+                <div className="document-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      handleDownloadDocument(document.id, document.original_file_name)
+                    }
+                  >
+                    Pobierz
+                  </button>
+
+                  {canManageDocuments && (
+                    <button
+                      type="button"
+                      className="danger-button"
+                      onClick={() => handleDeleteDocument(document.id)}
+                      disabled={deletingDocumentId === document.id}
+                    >
+                      {deletingDocumentId === document.id ? "Usuwanie..." : "Usuń"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="user-details-card">
+        <div className="page-header" style={{ marginBottom: "16px" }}>
           <h3 style={{ margin: 0 }}>Historia wniosków urlopowych</h3>
 
           <div className="user-history-filters">
@@ -558,6 +790,80 @@ export default function UserDetailsPage() {
                 disabled={createBalanceLoading}
               >
                 {createBalanceLoading ? "Tworzenie..." : "Utwórz saldo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addDocumentOpen && (
+        <div className="modal-overlay" onClick={closeAddDocument}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="page-header">
+              <h2 style={{ margin: 0 }}>Dodaj dokument</h2>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={closeAddDocument}
+              >
+                Zamknij
+              </button>
+            </div>
+
+            <div className="form-grid">
+              <div>
+                <label>Typ dokumentu</label>
+                <select
+                  name="document_type"
+                  value={documentForm.document_type}
+                  onChange={handleDocumentFormChange}
+                >
+                  {documentTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>Tytuł</label>
+                <input
+                  type="text"
+                  name="title"
+                  value={documentForm.title}
+                  onChange={handleDocumentFormChange}
+                  placeholder="Np. Umowa o pracę 2026"
+                />
+              </div>
+            </div>
+
+            <div className="form-full" style={{ marginTop: "16px" }}>
+              <label>Opis</label>
+              <textarea
+                name="description"
+                value={documentForm.description}
+                onChange={handleDocumentFormChange}
+                placeholder="Opcjonalny opis dokumentu"
+              />
+            </div>
+
+            <div className="form-full" style={{ marginTop: "16px" }}>
+              <label>Plik</label>
+              <input
+                type="file"
+                onChange={handleDocumentFileChange}
+              />
+            </div>
+
+            <div className="form-actions" style={{ marginTop: "20px" }}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={handleAddDocument}
+                disabled={documentSaving}
+              >
+                {documentSaving ? "Dodawanie..." : "Dodaj dokument"}
               </button>
             </div>
           </div>
