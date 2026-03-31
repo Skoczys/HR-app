@@ -1,8 +1,13 @@
 from datetime import date
 import calendar
+import os
+import shutil
+import uuid
+from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -10,6 +15,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from models.user import User
 from models.leave_request import LeaveRequest, LeaveBalance
+from models.employee_document import EmployeeDocument
 from schemas.user import (
     UserCreate,
     UserUpdate,
@@ -25,6 +31,7 @@ from schemas.leave_request import (
     LeaveBalanceUpdate,
     LeaveBalanceResponse,
 )
+from schemas.employee_document import EmployeeDocumentResponse
 from security import (
     hash_password,
     verify_password,
@@ -58,6 +65,20 @@ ALLOWED_LEAVE_TYPES = [
     "bezplatny",
 ]
 
+DOCUMENT_TYPES = [
+    "umowa",
+    "aneks",
+    "pit",
+    "badania",
+    "bhp",
+    "ppk",
+    "inne",
+]
+
+UPLOAD_ROOT = Path("uploads")
+EMPLOYEE_DOCUMENTS_DIR = UPLOAD_ROOT / "employee-documents"
+EMPLOYEE_DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # -----------------------
 # BAZA DANYCH
@@ -75,7 +96,7 @@ def get_db():
 
 
 # -----------------------
-# LEAVE REQUESTS - HELPERS
+# HELPERY OGÓLNE
 # -----------------------
 
 def calculate_leave_days(start_date, end_date):
@@ -87,6 +108,49 @@ def build_full_name(user: User | None):
         return None
     return f"{user.first_name} {user.last_name}"
 
+
+def calculate_base_leave_limit(leave_seniority_years: int) -> int:
+    if leave_seniority_years >= 10:
+        return 26
+    return 20
+
+
+def create_initial_leave_balance_for_user(
+    user_id: int,
+    leave_seniority_years: int,
+    db: Session,
+):
+    current_year = date.today().year
+
+    existing_balance = db.query(LeaveBalance).filter(
+        LeaveBalance.user_id == user_id,
+        LeaveBalance.year == current_year,
+    ).first()
+
+    if existing_balance:
+        return
+
+    base_limit_days = calculate_base_leave_limit(leave_seniority_years)
+
+    balance = LeaveBalance(
+        user_id=user_id,
+        year=current_year,
+        base_limit_days=base_limit_days,
+        carried_over_days=0,
+        used_days=0,
+        on_demand_used_days=0,
+    )
+
+    db.add(balance)
+
+
+def is_leave_active_on_day(leave: LeaveRequest, target_day: date) -> bool:
+    return leave.start_date <= target_day <= leave.end_date
+
+
+# -----------------------
+# HELPERY LEAVE REQUESTS
+# -----------------------
 
 def build_leave_response(leave: LeaveRequest, db: Session) -> LeaveRequestResponse:
     employee = db.query(User).filter(User.id == leave.user_id).first()
@@ -262,6 +326,7 @@ def apply_leave_balance_on_approval(
 
     balance.used_days += total_days
 
+
 def build_team_calendar_event(leave: LeaveRequest, db: Session):
     employee = db.query(User).filter(User.id == leave.user_id).first()
 
@@ -279,38 +344,54 @@ def build_team_calendar_event(leave: LeaveRequest, db: Session):
         "decision_comment": leave.decision_comment,
     }
 
-def is_leave_active_on_day(leave: LeaveRequest, target_day: date) -> bool:
-    return leave.start_date <= target_day <= leave.end_date
 
-def calculate_base_leave_limit(leave_seniority_years: int) -> int:
-    if leave_seniority_years >= 10:
-        return 26
-    return 20
+# -----------------------
+# HELPERY DOKUMENTÓW
+# -----------------------
+
+def can_view_user_documents(target_user: User, current_user: dict) -> bool:
+    current_role = current_user.get("role")
+    current_user_id = int(current_user.get("sub"))
+
+    if current_role in ["admin", "kadry", "zarzad"]:
+        return True
+
+    if current_role == "kierownik":
+        if target_user.id == current_user_id:
+            return True
+        if target_user.manager_user_id == current_user_id:
+            return True
+        return False
+
+    return target_user.id == current_user_id
 
 
-def create_initial_leave_balance_for_user(user_id: int, leave_seniority_years: int, db: Session):
-    current_year = date.today().year
+def can_manage_user_documents(current_user: dict) -> bool:
+    return current_user.get("role") in ["admin", "kadry"]
 
-    existing_balance = db.query(LeaveBalance).filter(
-        LeaveBalance.user_id == user_id,
-        LeaveBalance.year == current_year,
-    ).first()
 
-    if existing_balance:
-        return
+def build_employee_document_response(document: EmployeeDocument, db: Session) -> EmployeeDocumentResponse:
+    uploaded_by = db.query(User).filter(User.id == document.uploaded_by_user_id).first()
 
-    base_limit_days = calculate_base_leave_limit(leave_seniority_years)
+    uploaded_by_name = None
+    if uploaded_by:
+        uploaded_by_name = f"{uploaded_by.first_name} {uploaded_by.last_name}"
 
-    balance = LeaveBalance(
-        user_id=user_id,
-        year=current_year,
-        base_limit_days=base_limit_days,
-        carried_over_days=0,
-        used_days=0,
-        on_demand_used_days=0,
+    return EmployeeDocumentResponse(
+        id=document.id,
+        user_id=document.user_id,
+        uploaded_by_user_id=document.uploaded_by_user_id,
+        document_type=document.document_type,
+        title=document.title,
+        description=document.description,
+        original_file_name=document.original_file_name,
+        mime_type=document.mime_type,
+        file_size=document.file_size,
+        document_date=document.document_date,
+        created_at=document.created_at,
+        uploaded_by_name=uploaded_by_name,
     )
 
-    db.add(balance)
 
 # -----------------------
 # ROOT
@@ -532,7 +613,7 @@ def update_user(
 
     if current_role == "kadry" and user_data.role == "admin":
         raise HTTPException(status_code=403, detail="Kadry nie mogą nadawać roli admin")
-    
+
     if user_data.leave_seniority_years < 0:
         raise HTTPException(status_code=400, detail="Lata do urlopu nie mogą być ujemne")
 
@@ -1224,7 +1305,6 @@ def get_team_calendar(
     }
 
 
-
 # -----------------------
 # MANAGER DASHBOARD SUMMARY
 # -----------------------
@@ -1306,3 +1386,162 @@ def get_manager_dashboard_summary(
         "tomorrow_absences": tomorrow_absences,
         "upcoming_absences": upcoming_absences,
     }
+
+
+# -----------------------
+# EMPLOYEE DOCUMENTS - LIST
+# -----------------------
+
+@app.get("/users/{user_id}/documents", response_model=list[EmployeeDocumentResponse])
+def get_user_documents(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    target_user = db.query(User).filter(
+        User.id == user_id,
+        User.is_active == True,
+    ).first()
+
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+    if not can_view_user_documents(target_user, current_user):
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    documents = db.query(EmployeeDocument).filter(
+        EmployeeDocument.user_id == user_id
+    ).order_by(EmployeeDocument.created_at.desc(), EmployeeDocument.id.desc()).all()
+
+    return [build_employee_document_response(document, db) for document in documents]
+
+
+# -----------------------
+# EMPLOYEE DOCUMENTS - UPLOAD
+# -----------------------
+
+@app.post("/users/{user_id}/documents", response_model=EmployeeDocumentResponse)
+def upload_user_document(
+    user_id: int,
+    document_type: str = Form(...),
+    title: str = Form(...),
+    description: str | None = Form(default=None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    if not can_manage_user_documents(current_user):
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    target_user = db.query(User).filter(
+        User.id == user_id,
+        User.is_active == True,
+    ).first()
+
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+    if document_type not in DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail="Nieprawidłowy typ dokumentu")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Nie wybrano pliku")
+
+    employee_dir = EMPLOYEE_DOCUMENTS_DIR / str(user_id)
+    employee_dir.mkdir(parents=True, exist_ok=True)
+
+    file_extension = Path(file.filename).suffix
+    unique_name = f"{uuid.uuid4().hex}{file_extension}"
+    target_path = employee_dir / unique_name
+
+    with target_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    storage_key = f"employee-documents/{user_id}/{unique_name}"
+    file_size = target_path.stat().st_size if target_path.exists() else 0
+
+    document = EmployeeDocument(
+        user_id=user_id,
+        uploaded_by_user_id=int(current_user.get("sub")),
+        document_type=document_type,
+        title=title.strip(),
+        description=description.strip() if description else None,
+        original_file_name=file.filename,
+        stored_file_name=unique_name,
+        storage_key=storage_key,
+        mime_type=file.content_type,
+        file_size=file_size,
+    )
+
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
+    return build_employee_document_response(document, db)
+
+
+# -----------------------
+# EMPLOYEE DOCUMENTS - DOWNLOAD
+# -----------------------
+
+@app.get("/documents/{document_id}/download")
+def download_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    document = db.query(EmployeeDocument).filter(EmployeeDocument.id == document_id).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nie istnieje")
+
+    target_user = db.query(User).filter(
+        User.id == document.user_id,
+        User.is_active == True,
+    ).first()
+
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Użytkownik nie istnieje")
+
+    if not can_view_user_documents(target_user, current_user):
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    file_path = UPLOAD_ROOT / document.storage_key
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Plik nie istnieje na dysku")
+
+    return FileResponse(
+        path=file_path,
+        filename=document.original_file_name,
+        media_type=document.mime_type or "application/octet-stream",
+    )
+
+
+# -----------------------
+# EMPLOYEE DOCUMENTS - DELETE
+# -----------------------
+
+@app.delete("/documents/{document_id}")
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    if not can_manage_user_documents(current_user):
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+    document = db.query(EmployeeDocument).filter(EmployeeDocument.id == document_id).first()
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nie istnieje")
+
+    file_path = UPLOAD_ROOT / document.storage_key
+
+    if file_path.exists():
+        os.remove(file_path)
+
+    db.delete(document)
+    db.commit()
+
+    return {"message": "Dokument został usunięty"}

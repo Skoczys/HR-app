@@ -5,6 +5,7 @@ from pydantic import BaseModel, field_validator
 ALLOWED_LEAVE_TYPES = [
     "wypoczynkowy",
     "na_zadanie",
+    "chorobowe",
     "okolicznosciowy",
     "bezplatny",
 ]
@@ -91,10 +92,6 @@ class LeaveRequestResponse(BaseModel):
     class Config:
         from_attributes = True
 
-
-# -----------------------
-# LEAVE BALANCE SCHEMAS
-# -----------------------
 
 class LeaveBalanceCreate(BaseModel):
     user_id: int
