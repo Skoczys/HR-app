@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
 const initialForm = {
@@ -31,6 +32,8 @@ const departmentOptions = [
 ];
 
 export default function UsersPage() {
+  const navigate = useNavigate();
+
   const [users, setUsers] = useState([]);
   const [managers, setManagers] = useState([]);
   const [profile, setProfile] = useState(null);
@@ -381,6 +384,10 @@ export default function UsersPage() {
     }
   };
 
+  const goToUserDetails = (userId) => {
+    navigate(`/users/${userId}`);
+  };
+
   if (!canViewUsers) {
     return (
       <div className="users-page">
@@ -558,7 +565,10 @@ export default function UsersPage() {
 
             {editingUserId && (
               <div className="user-balance-box">
-                <div className="page-header" style={{ marginBottom: "16px", marginTop: "24px" }}>
+                <div
+                  className="page-header"
+                  style={{ marginBottom: "16px", marginTop: "24px" }}
+                >
                   <h3 style={{ margin: 0 }}>Saldo urlopowe ({currentYear})</h3>
 
                   {!balanceLoading && editingBalance && (
@@ -701,6 +711,13 @@ export default function UsersPage() {
             <div>{user.email}</div>
 
             <div className="users-actions">
+              <button
+                className="table-button secondary-button"
+                onClick={() => goToUserDetails(user.id)}
+              >
+                Szczegóły
+              </button>
+
               {canManageUsers && (
                 <button
                   className="table-button secondary-button"

@@ -10,6 +10,7 @@ import TeamCalendar from "./pages/TeamCalendar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AppLayout from "./layout/AppLayout";
 import MyProfilePage from "./pages/MyProfilePage";
+import MyDocumentsPage from "./pages/MyDocumentsPage";
 import { getToken, getMustChangePassword } from "./services/auth";
 
 export default function App() {
@@ -33,9 +34,7 @@ export default function App() {
 
       <Route
         path="/change-password"
-        element={
-          token ? <ChangePassword /> : <Navigate to="/login" replace />
-        }
+        element={token ? <ChangePassword /> : <Navigate to="/login" replace />}
       />
 
       <Route
@@ -119,6 +118,17 @@ export default function App() {
           <ProtectedRoute>
             <AppLayout>
               <MyProfilePage />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/my-documents"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <MyDocumentsPage />
             </AppLayout>
           </ProtectedRoute>
         }
